@@ -1,0 +1,45 @@
+defaults:
+  - _self_
+  - override hydra/sweeper: optuna
+  - override hydra/sweeper/sampler: nsgaii
+  - override hydra/hydra_logging: disabled
+  - override hydra/job_logging: disabled
+
+hydra:
+  output_subdir: null
+  run:
+    dir: .
+  sweeper:
+    sampler:
+      seed: 39
+    direction: maximize
+    study_name: multi-objective
+    storage: null
+    n_trials: 20
+    n_jobs: 1
+    params:
+      # epochs: range(10, 50, step=20)
+
+seed: 39
+epochs: 3000
+
+model:
+  task: edges_prediction # "edges_prediction", "node_classification"
+  decoder: mlp # "dot_product", "bilinear", "mlp"
+  n_layers: 2
+  hidden_chanels: 80
+  maps_dim: 2
+  dropout: 0.1
+  decoder_dropout: 0.5
+
+optimizer:
+  lr: 1e-3
+  weight_decay: 1e-5
+  early_stop: True
+  early_stop_iters: 100
+
+dataset:
+  name: Cora # "Simple", "Synthetic", "Cora", "Movielense"
+  test_size: 0.2
+  ndata: 1000
+  dimx: 20

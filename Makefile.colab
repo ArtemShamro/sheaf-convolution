@@ -1,0 +1,10 @@
+.PHONY: all
+all: uv
+	@echo "✅ Установка зависимостей с помощью uv..."
+	uv pip install -r pyproject.toml
+	uv pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.5.0+cu121.html
+
+.PHONY: uv
+uv:
+	@echo "📦 Установка uv..."
+	pip install uv
