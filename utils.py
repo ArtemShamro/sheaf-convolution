@@ -165,11 +165,10 @@ class CustomBCELoss(nn.Module):
 
         pos_mask = (targets == 1)
         zeros = torch.zeros_like(preds)
-        # Вычисляем бинарную кросс-энтропию по формуле
+
+        # Вычисляем бинарную кросс-энтропию
         loss_pos = pos_weight * targets * (F.softplus(-preds))
         loss_neg = (1 - targets) * (F.softplus(preds))
-        loss = loss_pos + loss_neg
-
         loss = loss_pos + loss_neg
 
         if self.print_loss:
@@ -182,3 +181,82 @@ class CustomBCELoss(nn.Module):
 
         # Возвращаем среднее значение потерь
         return loss.mean()
+
+# class CustomBCELoss(nn.Module):
+#     def __init__(self, print_loss=False):
+#         super().__init__()
+#         self.print_loss = print_loss
+
+#     def forward(self, preds, targets, mask=None):
+#         if mask is not None:
+#             preds = preds[mask]
+#             targets = targets[mask]
+
+#         # Ограничиваем pos_weight для стабильности
+#         pos_weight = min((targets.numel() - targets.sum()) /
+#                          targets.sum(), 50.0)
+#         pos_weight = torch.tensor(pos_weight, device=preds.device)
+
+#         # Используем BCEWithLogitsLoss
+#         criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+#         loss = criterion(preds.flatten(), targets.flatten())
+
+#         if self.print_loss:
+#             print("NEG WEIGHTS:", pos_weight.item())
+#             print("PREDICTIONS:", preds.flatten()[:10])
+#             print("TARGETS:", targets.flatten()[:10])
+#             print("LOSS:", loss.item())
+#             print("")
+
+#         return loss
+
+
+class VGAELoss(nn.Module):
+    def __init__(self, print_loss: bool = False):
+        """
+        Функция потерь для VGAE: ELBO = BCE (реконструкция рёбер) - KL-дивергенция.
+
+        Args:
+            print_loss (bool): Если True, выводит значения BCE, KL и общего лосса для отладки.
+        """
+        super().__init__()
+        self.print_loss = print_loss
+
+    def forward(self, logits: torch.Tensor, labels: torch.Tensor, mu: torch.Tensor, logvar: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
+        """
+        Вычисляет ELBO: -BCE - KL-дивергенция.
+
+        Args:
+            logits (torch.Tensor): Логиты рёбер, форма (num_nodes, num_nodes).
+            labels (torch.Tensor): Целевая матрица смежности, форма (num_nodes, num_nodes).
+            mu (torch.Tensor): Средние латентных распределений, форма (num_nodes, hidden_dim2).
+            logvar (torch.Tensor): Логарифмы дисперсий, форма (num_nodes, hidden_dim2).
+            mask (torch.Tensor): Маска для рёбер/non-edges, форма (num_nodes, num_nodes), опционально.
+
+        Returns:
+            loss (torch.Tensor): Скалярное значение ELBO.
+        """
+        # BCE для реконструкции рёбер
+        if mask is not None:
+            logits = logits[mask]
+            labels = labels[mask]
+        bce_loss = F.binary_cross_entropy_with_logits(
+            logits, labels, reduction='sum')
+
+        # KL-дивергенция: -0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
+        kl_div = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+
+        # ELBO = -BCE - KL (минимизируем -ELBO)
+        loss = bce_loss + kl_div
+
+        if self.print_loss:
+            print("BCE Loss:", bce_loss.item())
+            print("KL Divergence:", kl_div.item())
+            print("Total Loss:", loss.item())
+            print("Logits mean:", logits.mean().item())
+            print("Logits std:", logits.std().item())
+            print("Mu std:", mu.std().item())
+            print("Logvar std:", logvar.std().item())
+            print("")
+
+        return loss

@@ -49,7 +49,7 @@ class MultiMetric(Metric):
         self.loss = 0.0
 
     def update(self, logits: torch.Tensor, targets: torch.Tensor, loss: float):
-        pred_classes = (logits > 0.5).int()
+        pred_classes = (logits > 0).int()
         self.accuracy.update(pred_classes, targets)
         self.precision.update(pred_classes, targets)
         self.recall.update(pred_classes, targets)

@@ -9,6 +9,8 @@ from model.laplacian_builder import LaplacianBuilder
 from model.decoders import MLPDecoder, DotProductDecoder, BilinearDecoder
 from utils import build_masks, get_adj_mat, get_degrees_and_edges
 
+import wandb
+
 
 class Diffusion(nn.Module):
     def __init__(self, config: ModelDiffusionConfig):
@@ -94,5 +96,15 @@ class Diffusion(nn.Module):
                 num_nodes * self.config.maps_dim, -1)).reshape(-1, self.hidden_dim)
             x = x - self.alpha[layer] * dx
 
+        # x = nn.LayerNorm(self.hidden_dim, device=self.config.device)(x)
+
+        # print(x.detach())
+        # print("x mean:", x.mean().item())
+        # print("x std:", x.std().item())
+        # print("x min:", x.min().item())
+        # print("x max:", x.max().item())
+        # print("x L2 norm:", torch.norm(x, p=2, dim=1).detach())
+        # wandb.log({"x_distribution": wandb.Histogram(
+        #     x.cpu().detach().flatten(), num_bins=50)})
         x = self.decoder(x)
         return x

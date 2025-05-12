@@ -1,3 +1,4 @@
+import random
 import networkx as nx
 import torch
 from torch_geometric.datasets import Planetoid
@@ -166,31 +167,185 @@ def generate_graph(ndata, dimx, s_threshold=0.2, nproj=4, nvec=2):
             torch.from_numpy(xproj).float())
 
 
-def generate_cora_data(task: str = 'classification', test_size: float = 0.2) -> Tuple[nx.Graph, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    PL = Planetoid(root="./datasets/Planetoid/", name="Cora",
-                   transform=T.NormalizeFeatures())
-    graph = PL[0]
+# def generate_cora_data(task: str = 'classification', test_size: float = 0.2, device: str = 'cpu', neg_ratio: float = 1.0) -> Tuple[nx.Graph, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+#     """
+#     Подготавливает датасет Cora для задачи классификации узлов или восстановления рёбер.
 
-    # # Additional normalization steps
-    # # 1. Normalize features to unit norm
-    # features = graph.x
-    # features = torch.nn.functional.normalize(features, p=2, dim=1)
+#     Args:
+#         task (str): Тип задачи ('classification' или 'edge_prediction').
+#         test_size (float): Доля рёбер для тестового набора (для edge_prediction).
+#         device (str): Устройство для тензоров ('cpu' или 'cuda').
+#         neg_ratio (float): Доля negative samples для тестового набора относительно тестовых рёбер.
 
-    # # 2. Scale features to [-1, 1] range
-    # features = 2 * (features - features.min()) / \
-    #     (features.max() - features.min()) - 1
+#     Returns:
+#         G (nx.Graph): Граф в формате NetworkX.
+#         graph.x (torch.Tensor): Эмбеддинги вершин (признаки узлов).
+#         graph.y (torch.Tensor): Целевая переменная (метки узлов или матрица смежности).
+#         train_mask (torch.Tensor): Маска для тренировочных данных (все рёбра и negative samples, не вошедшие в тест).
+#         test_mask (torch.Tensor): Маска для тестовых данных.
+#     """
+#     # Загружаем Cora с нормализацией признаков
+#     dataset = Planetoid(root="./datasets/Planetoid/",
+#                         name="Cora", transform=T.NormalizeFeatures())
+#     graph = dataset[0]
+#     num_nodes = graph.num_nodes  # 2708 для Cora
 
-    # # 3. Add small epsilon to avoid zero values
-    # features = features + 1e-6
+#     # Преобразуем в NetworkX граф (неориентированный)
+#     G = to_networkx(graph, to_undirected=True)
 
-    # # Update graph features
-    # graph.x = features
+#     if task == 'classification':
+#         # Для классификации узлов используем стандартный сплит Cora
+#         train_mask = graph.train_mask
+#         test_mask = graph.test_mask
+#         return G, graph.x.to(device), graph.y.to(device), train_mask.to(device), test_mask.to(device)
 
+#     elif task == 'edges_prediction':
+#         # Создаём матрицу смежности как целевую переменную
+#         adj_mat = torch.zeros((num_nodes, num_nodes),
+#                               dtype=torch.float, device=device)
+#         edge_index = graph.edge_index.to(device)
+#         # Заполняем матрицу смежности (симметрично, так как граф неориентированный)
+#         adj_mat[edge_index[0], edge_index[1]] = 1
+#         adj_mat[edge_index[1], edge_index[0]] = 1
+
+#         # Получаем список всех рёбер
+#         edges = list(G.edges())
+#         num_edges = len(edges)
+#         random.shuffle(edges)  # Перемешиваем рёбра
+
+#         # Разделяем рёбра на тренировочные и тестовые
+#         num_test_edges = int(num_edges * test_size)
+#         test_edges = edges[:num_test_edges]
+#         train_edges = edges[num_test_edges:]
+
+#         # Создаём negative samples (отсутствующие рёбра)
+#         all_possible_edges = set((i, j) for i in range(num_nodes)
+#                                  for j in range(i + 1, num_nodes))
+#         existing_edges = set((min(u, v), max(u, v)) for u, v in G.edges())
+#         negative_edges = list(all_possible_edges - existing_edges)
+#         random.shuffle(negative_edges)
+
+#         # Выбираем negative samples для теста
+#         num_test_neg = int(num_test_edges * neg_ratio)
+#         test_negative_edges = negative_edges[:num_test_neg]
+#         # Все оставшиеся negative samples идут в тренировочный набор
+#         train_negative_edges = negative_edges[num_test_neg:]
+
+#         # Создаём маски
+#         train_mask = torch.zeros(
+#             (num_nodes, num_nodes), dtype=torch.bool, device=device)
+#         test_mask = torch.zeros((num_nodes, num_nodes),
+#                                 dtype=torch.bool, device=device)
+
+#         # Заполняем тренировочную маску (рёбра и все оставшиеся negative samples)
+#         for u, v in train_edges:
+#             train_mask[u, v] = True
+#             train_mask[v, u] = True  # Симметрия
+#         for u, v in train_negative_edges:
+#             train_mask[u, v] = True
+#             train_mask[v, u] = True
+
+#         # Заполняем тестовую маску
+#         for u, v in test_edges:
+#             test_mask[u, v] = True
+#             test_mask[v, u] = True
+#         for u, v in test_negative_edges:
+#             test_mask[u, v] = True
+#             test_mask[v, u] = True
+
+#         return G, graph.x.to(device), adj_mat, train_mask, test_mask
+
+#     else:
+#         raise ValueError(
+#             f"Unknown task: {task}. Supported tasks: 'classification', 'edge_prediction'.")
+
+# def generate_cora_data(task: str = 'classification', test_size: float = 0.2) -> Tuple[nx.Graph, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+#     PL = Planetoid(root="./datasets/Planetoid/", name="Cora",
+#                    transform=T.NormalizeFeatures())
+#     graph = PL[0]
+
+#     G = to_networkx(graph, to_undirected=True)
+#     if task == 'classification':
+#         return G, graph.x, graph.y, ~graph.test_mask, graph.test_mask
+#     train_mask, test_mask = get_mask_edge_prediction(G, test_size=test_size)
+#     assert torch.all(train_mask == train_mask.T), "Train mask is not symmetric"
+#     assert torch.all(test_mask == test_mask.T), "Test mask is not symmetric"
+#     return G, graph.x, graph.y, train_mask, test_mask
+
+
+def generate_cora_data(task: str = 'edge_prediction', test_size: float = 0.1, val_size: float = 0.05, device: str = 'cpu', neg_ratio: float = 1.0):
+    dataset = Planetoid(root="./datasets/Planetoid/",
+                        name="Cora", transform=T.NormalizeFeatures())
+    graph = dataset[0]
+    num_nodes = graph.num_nodes
     G = to_networkx(graph, to_undirected=True)
-    if task == 'classification':
-        return G, graph.x, graph.y, ~graph.test_mask, graph.test_mask
-    train_mask, test_mask = get_mask_edge_prediction(G, test_size=test_size)
-    return G, graph.x, graph.y, train_mask, test_mask
+
+    if task != 'edges_prediction':
+        raise ValueError("This model supports only edge_prediction")
+
+    adj_mat = torch.zeros((num_nodes, num_nodes),
+                          dtype=torch.float, device=device)
+    edge_index = graph.edge_index.to(device)
+    adj_mat[edge_index[0], edge_index[1]] = 1
+    adj_mat[edge_index[1], edge_index[0]] = 1
+
+    edges = list(G.edges())
+    num_edges = len(edges)
+    random.shuffle(edges)
+    num_test_edges = int(num_edges * test_size)
+    num_val_edges = int(num_edges * val_size)
+    num_train_edges = num_edges - num_test_edges - num_val_edges
+
+    test_edges = edges[:num_test_edges]
+    val_edges = edges[num_test_edges:num_test_edges + num_val_edges]
+    train_edges = edges[num_test_edges + num_val_edges:]
+
+    all_possible_edges = set((i, j) for i in range(num_nodes)
+                             for j in range(i + 1, num_nodes))
+    existing_edges = set((min(u, v), max(u, v)) for u, v in G.edges())
+    negative_edges = list(all_possible_edges - existing_edges)
+    random.shuffle(negative_edges)
+
+    num_test_neg = int(num_test_edges * neg_ratio)
+    num_val_neg = int(num_val_edges * neg_ratio)
+    num_train_neg = int(num_train_edges * neg_ratio)
+    test_negative_edges = negative_edges[:num_test_neg]
+    val_negative_edges = negative_edges[num_test_neg:num_test_neg + num_val_neg]
+    train_negative_edges = negative_edges[num_test_neg +
+                                          num_val_neg:num_test_neg + num_val_neg + num_train_neg]
+
+    train_mask = torch.zeros((num_nodes, num_nodes),
+                             dtype=torch.bool, device=device)
+    val_mask = torch.zeros((num_nodes, num_nodes),
+                           dtype=torch.bool, device=device)
+    test_mask = torch.zeros((num_nodes, num_nodes),
+                            dtype=torch.bool, device=device)
+
+    for u, v in train_edges:
+        train_mask[u, v] = True
+        train_mask[v, u] = True
+    for u, v in train_negative_edges:
+        train_mask[u, v] = True
+        train_mask[v, u] = True
+
+    for u, v in val_edges:
+        val_mask[u, v] = True
+        val_mask[v, u] = True
+    for u, v in val_negative_edges:
+        val_mask[u, v] = True
+        val_mask[v, u] = True
+
+    for u, v in test_edges:
+        test_mask[u, v] = True
+        test_mask[v, u] = True
+    for u, v in test_negative_edges:
+        test_mask[u, v] = True
+        test_mask[v, u] = True
+
+    G_train = G.copy()
+    G_train.remove_edges_from(test_edges + val_edges)
+
+    return G_train, graph.x.to(device), adj_mat, train_mask,  test_mask
 
 
 def generate_features_and_labels(num_nodes, dim_features, num_classes=2):

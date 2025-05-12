@@ -26,39 +26,43 @@ def train(epochs, model, criterion, data, labels, graph: nx.Graph, optimizer, ma
             model.train()
             optimizer.zero_grad()
 
-            logits = model(data, graph)
+            logits, mu, logvar = model(data, graph)
             preds = torch.sigmoid(logits).detach()
 
-            loss = criterion(logits[train_mask], labels[train_mask])
-            # loss = criterion(logits.flatten(), labels.flatten())
+            loss = criterion(logits, labels, mu, logvar, train_mask)
 
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
             optimizer.step()
 
             if scheduler is not None:
                 scheduler.step()
 
+            # test_accuracy = ((preds > 0.5).flatten().int() ==
+            #                  labels.flatten().int()).sum() / preds.numel()
+            # print("test_accuracy", test_accuracy)
+
             metric_logger.update(
                 # "train", preds.flatten(), labels.flatten(), loss.item())
 
-                "train", preds[train_mask], labels[train_mask], loss.item())
-            metric.update(epoch)
+                "train", logits[train_mask], labels[train_mask], loss.item())
+            # metric.update(epoch)
 
             model.eval()
             with torch.no_grad():
 
-                #     logits = model(data)
-                #     preds = logits.argmax(dim=1)
+                logits, _, _ = model(data, graph)
+                # preds = (logits > 0).float()
 
-                test_loss = criterion(logits[test_mask], labels[test_mask])
+                # test_loss = criterion(logits[test_mask], labels[test_mask])
 
                 metric_logger.update(
-                    "test", preds[test_mask], labels[test_mask], test_loss.item())
+                    "test", logits[test_mask], labels[test_mask], 0)
 
             # Early stopping
-            if test_loss.item() <= best_test_loss:
+            if loss.item() <= best_test_loss:
                 stop_counter = 0
-                best_test_loss = test_loss.item()
+                best_test_loss = loss.item()
             else:
                 stop_counter += 1
 

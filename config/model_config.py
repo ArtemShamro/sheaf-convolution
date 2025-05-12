@@ -5,6 +5,7 @@ from typing import Optional, Literal
 
 @dataclass
 class ModelDiffusionConfig():
+    type: Literal["diffusion", "VGAE"] = "diffusion"
     task: Literal["edges_prediction",
                   "node_classification"] = "edges_prediction"
     decoder: str = "dot_product"

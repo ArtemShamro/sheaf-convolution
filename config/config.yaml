@@ -24,16 +24,17 @@ seed: 39
 epochs: 3000
 
 model:
+  type: VGAE # "diffusion", "gcn"
   task: edges_prediction # "edges_prediction", "node_classification"
-  decoder: mlp # "dot_product", "bilinear", "mlp"
+  decoder: dot_product # "dot_product", "bilinear", "mlp"
   n_layers: 2
-  hidden_chanels: 80
+  hidden_chanels: 20
   maps_dim: 2
   dropout: 0.1
   decoder_dropout: 0.5
 
 optimizer:
-  lr: 1e-3
+  lr: 1e-2
   weight_decay: 1e-5
   early_stop: True
   early_stop_iters: 100
@@ -41,5 +42,5 @@ optimizer:
 dataset:
   name: Cora # "Simple", "Synthetic", "Cora", "Movielense"
   test_size: 0.2
-  ndata: 1000
+  ndata: 2500
   dimx: 20
