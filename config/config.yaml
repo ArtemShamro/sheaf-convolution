@@ -24,7 +24,7 @@ seed: 39
 epochs: 3000
 
 model:
-  type: VGAE # "diffusion", "gcn"
+  type: GAE # "diffusion", "gcn"
   task: edges_prediction # "edges_prediction", "node_classification"
   decoder: dot_product # "dot_product", "bilinear", "mlp"
   n_layers: 2

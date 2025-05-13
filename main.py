@@ -1,6 +1,6 @@
 from model.model import Diffusion, ModelDiffusionConfig
 from metrics.metrics import MetricLogger
-from model.baseline_model import VGAE
+from model.baseline_model import GAE
 from dataloader.dataloader import generate_dataset
 from config.model_config import ModelDiffusionConfig
 from utils import set_seed, get_adj_mat, CustomBCELoss
@@ -45,11 +45,8 @@ def main(cfg: DictConfig):
 
     match cfg.model.task:
         case "edges_prediction":
-            from utils import VGAELoss
-            # criterion = CustomBCELoss(print_loss=False)
-            # criterion = nn.BCEWithLogitsLoss()
-            criterion = VGAELoss()
-            labels = get_adj_mat(G)
+            criterion = CustomBCELoss(print_loss=False)
+            # criterion = nn.BCEWithLogitsLoss(pos_weight=650)
             model_config = replace(
                 model_config,
                 output_dim=1,
@@ -65,7 +62,7 @@ def main(cfg: DictConfig):
             )
 
     model = Diffusion(model_config).to(
-        device) if cfg.model.type == "diffusion" else VGAE(config=model_config).to(device)
+        device) if cfg.model.type == "diffusion" else GAE(config=model_config).to(device)
 
     wandb.watch(model, log="all", log_freq=50)
 

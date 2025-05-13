@@ -294,11 +294,9 @@ def generate_cora_data(task: str = 'edge_prediction', test_size: float = 0.1, va
     random.shuffle(edges)
     num_test_edges = int(num_edges * test_size)
     num_val_edges = int(num_edges * val_size)
-    num_train_edges = num_edges - num_test_edges - num_val_edges
 
     test_edges = edges[:num_test_edges]
     val_edges = edges[num_test_edges:num_test_edges + num_val_edges]
-    train_edges = edges[num_test_edges + num_val_edges:]
 
     all_possible_edges = set((i, j) for i in range(num_nodes)
                              for j in range(i + 1, num_nodes))
@@ -308,39 +306,38 @@ def generate_cora_data(task: str = 'edge_prediction', test_size: float = 0.1, va
 
     num_test_neg = int(num_test_edges * neg_ratio)
     num_val_neg = int(num_val_edges * neg_ratio)
-    num_train_neg = int(num_train_edges * neg_ratio)
+
     test_negative_edges = negative_edges[:num_test_neg]
     val_negative_edges = negative_edges[num_test_neg:num_test_neg + num_val_neg]
-    train_negative_edges = negative_edges[num_test_neg +
-                                          num_val_neg:num_test_neg + num_val_neg + num_train_neg]
 
-    train_mask = torch.zeros((num_nodes, num_nodes),
-                             dtype=torch.bool, device=device)
+    train_mask = torch.ones((num_nodes, num_nodes),
+                            dtype=torch.bool, device=device)
     val_mask = torch.zeros((num_nodes, num_nodes),
                            dtype=torch.bool, device=device)
     test_mask = torch.zeros((num_nodes, num_nodes),
                             dtype=torch.bool, device=device)
 
-    for u, v in train_edges:
-        train_mask[u, v] = True
-        train_mask[v, u] = True
-    for u, v in train_negative_edges:
-        train_mask[u, v] = True
-        train_mask[v, u] = True
-
     for u, v in val_edges:
         val_mask[u, v] = True
         val_mask[v, u] = True
+        train_mask[u, v] = False
+        train_mask[v, u] = False
     for u, v in val_negative_edges:
         val_mask[u, v] = True
         val_mask[v, u] = True
+        train_mask[u, v] = False
+        train_mask[v, u] = False
 
     for u, v in test_edges:
         test_mask[u, v] = True
         test_mask[v, u] = True
+        train_mask[u, v] = False
+        train_mask[v, u] = False
     for u, v in test_negative_edges:
         test_mask[u, v] = True
         test_mask[v, u] = True
+        train_mask[u, v] = False
+        train_mask[v, u] = False
 
     G_train = G.copy()
     G_train.remove_edges_from(test_edges + val_edges)

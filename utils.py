@@ -164,7 +164,6 @@ class CustomBCELoss(nn.Module):
         targets = targets.flatten()
 
         pos_mask = (targets == 1)
-        zeros = torch.zeros_like(preds)
 
         # Вычисляем бинарную кросс-энтропию
         loss_pos = pos_weight * targets * (F.softplus(-preds))
