@@ -4,6 +4,7 @@ import torch.nn as nn
 import networkx as nx
 from torch_geometric.nn import GCNConv
 from torch_geometric.utils import to_undirected
+from model.decoders import BilinearDecoder
 from config.model_config import ModelDiffusionConfig
 
 
@@ -22,6 +23,8 @@ class GAE(nn.Module):
         self.conv1 = GCNConv(config.input_dim, hidden_dim1)
         # Для скрытых представлений
         self.conv2 = GCNConv(hidden_dim1, hidden_dim2)
+
+        # self.decoder = BilinearDecoder(hidden_dim2)
 
     def encode(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
         """
@@ -49,6 +52,7 @@ class GAE(nn.Module):
             logits (torch.Tensor): Логиты unwitting рёбер, форма (num_nodes, num_nodes).
         """
         return torch.matmul(z, z.t())  # Скалярное произведение: z_i^T z_j
+        # return self.decoder(z)
 
     def forward(self, x: torch.Tensor, G: nx.Graph) -> torch.Tensor:
         """
@@ -66,7 +70,6 @@ class GAE(nn.Module):
             list(G.edges()), dtype=torch.long, device=x.device).t()
         # Убедимся, что граф неориентированный
         edge_index = to_undirected(edge_index)
-        print("model: edge_index shape = ", edge_index.shape)
 
         # Энкодер
         z = self.encode(x, edge_index)

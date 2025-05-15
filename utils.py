@@ -108,44 +108,65 @@ def draw_graph(G: nx.Graph, data_y=None, data_x: np.array = None):
     plt.show(block=False)
 
 
-def get_mask_edge_prediction(G: nx.Graph, train_size: float = None, test_size: float = None, device: str = 'cpu'):
-    assert train_size is not None or test_size is not None, "Either train_size or test_size must be specified"
-    test_size = test_size if test_size is not None else 1 - train_size
-    train_size = train_size if train_size is not None else 1 - test_size
-
-    assert train_size + test_size == 1, "Train and test sizes must sum to 1"
-
-    # Все ребра
+def get_mask_edge_prediction(G: nx.Graph, test_size: float = None, val_size: float = None, neg_ratio=1, device: str = 'cpu'):
+    num_nodes = G.number_of_nodes()
     edges = list(G.edges())
-
-    # Перемешал
+    num_edges = len(edges)
     random.shuffle(edges)
-
-    # Выбрал случайных 0.8 доля
-    num_test_edges = int(len(edges) * test_size)
+    num_test_edges = int(num_edges * test_size)
+    num_val_edges = int(num_edges * val_size)
 
     test_edges = edges[:num_test_edges]
+    val_edges = edges[num_test_edges:num_test_edges + num_val_edges]
 
-    # Negative Sampling
-    all_possible_edges = set((i, j) for i in G.nodes()
-                             for j in G.nodes() if i < j)
-    existing_edges = set(G.edges())
-    # Все отстутсвующе ребра (i, j)
+    all_possible_edges = set((i, j) for i in range(num_nodes)
+                             for j in range(i + 1, num_nodes))
+    existing_edges = set((min(u, v), max(u, v)) for u, v in G.edges())
     negative_edges = list(all_possible_edges - existing_edges)
+    random.shuffle(negative_edges)
 
-    random.shuffle(negative_edges)  # Shuffle
-    # Выбрал столько же сколько и positive ребер в test set
-    test_negative_edges = negative_edges[:len(test_edges)]
+    num_test_neg = int(num_test_edges * neg_ratio)
+    num_val_neg = int(num_val_edges * neg_ratio)
 
-    test_mask_edges = test_edges + test_negative_edges
+    test_negative_edges = negative_edges[:num_test_neg]
+    val_negative_edges = negative_edges[num_test_neg:num_test_neg + num_val_neg]
 
-    G_train = nx.Graph()
-    G_train.add_nodes_from(G.nodes)
-    G_train.add_edges_from(test_mask_edges)
-    test_mask = torch.tensor(nx.to_numpy_array(G_train)).bool().to(device)
-    train_mask = ~test_mask
+    train_mask = torch.ones((num_nodes, num_nodes),
+                            dtype=torch.bool, device=device)
+    val_mask = torch.zeros((num_nodes, num_nodes),
+                           dtype=torch.bool, device=device)
+    test_mask = torch.zeros((num_nodes, num_nodes),
+                            dtype=torch.bool, device=device)
 
-    return train_mask, test_mask
+    val_edges_array = np.array(val_edges).T
+    val_neg_edges_array = np.array(val_negative_edges).T
+    val_mask[val_edges_array[0], val_edges_array[1]] = True
+    val_mask[val_edges_array[1], val_edges_array[0]] = True
+    val_mask[val_neg_edges_array[0], val_neg_edges_array[1]] = True
+    val_mask[val_neg_edges_array[1], val_neg_edges_array[0]] = True
+
+    test_edges_array = np.array(test_edges).T
+    test_neg_edges_array = np.array(test_negative_edges).T
+    test_mask[test_edges_array[0], test_edges_array[1]] = True
+    test_mask[test_edges_array[1], test_edges_array[0]] = True
+    test_mask[test_neg_edges_array[0], test_neg_edges_array[1]] = True
+    test_mask[test_neg_edges_array[1], test_neg_edges_array[0]] = True
+
+    train_mask[val_edges_array[0], val_edges_array[1]] = False
+    train_mask[val_edges_array[1], val_edges_array[0]] = False
+    train_mask[val_neg_edges_array[0], val_neg_edges_array[1]] = False
+    train_mask[val_neg_edges_array[1], val_neg_edges_array[0]] = False
+    train_mask[test_edges_array[0], test_edges_array[1]] = False
+    train_mask[test_edges_array[1], test_edges_array[0]] = False
+    train_mask[test_neg_edges_array[0], test_neg_edges_array[1]] = False
+    train_mask[test_neg_edges_array[1], test_neg_edges_array[0]] = False
+
+    train_mask.fill_diagonal_(False)
+
+    G_train = G.copy()
+    G_train.remove_edges_from(test_edges + val_edges)
+
+    return G_train, train_mask, val_mask, test_mask
 
 
 class CustomBCELoss(nn.Module):

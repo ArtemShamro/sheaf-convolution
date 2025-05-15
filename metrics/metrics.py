@@ -1,6 +1,6 @@
 import torch
 import wandb
-from torchmetrics import Accuracy, Precision, Recall, F1Score, AUROC, Metric
+from torchmetrics import Accuracy, Precision, Recall, F1Score, AUROC, Metric, AveragePrecision
 from sklearn.metrics import confusion_matrix
 import numpy as np
 
@@ -45,7 +45,8 @@ class MultiMetric(Metric):
         self.accuracy = Accuracy(task=task)
         self.precision = Precision(task=task)
         self.recall = Recall(task=task)
-        # self.auroc = AUROC(task=task)
+        self.auroc = AUROC(task=task)
+        self.ap = AveragePrecision(task=task)
         self.loss = 0.0
 
     def update(self, logits: torch.Tensor, targets: torch.Tensor, loss: float):
@@ -54,9 +55,9 @@ class MultiMetric(Metric):
         self.precision.update(pred_classes, targets)
         self.recall.update(pred_classes, targets)
 
-        # Логиты для AUROC
-        # self.auroc.update(logits, targets)
-
+        probs = torch.sigmoid(logits)
+        self.ap.update(probs, targets)
+        self.auroc.update(probs, targets)
         self.loss += loss
 
     def compute(self):
@@ -64,15 +65,17 @@ class MultiMetric(Metric):
             f"accuracy": self.accuracy.compute().item(),
             f"precision": self.precision.compute().item(),
             f"recall": self.recall.compute().item(),
-            # f"{self.prefix}auroc": self.auroc.compute().item(),
-            f"loss": self.loss
+            f"loss": self.loss,
+            f"aucroc": self.auroc.compute().item(),
+            f"ap": self.ap.compute().item()
         }
 
     def reset(self):
         self.accuracy.reset()
         self.precision.reset()
         self.recall.reset()
-        # self.auroc.reset()
+        self.auroc.reset()
+        self.ap.reset()
         self.loss = 0.0
 
 
@@ -117,6 +120,7 @@ def compute_log_confusion_matrix(labels, preds, train_mask, test_mask):
                 preds=np.array(
                     pred_classes[train_mask].cpu().flatten()).tolist(),
                 class_names=["Class 0", "Class 1"],
+                title="Confusion Matrix (Train)"
             ),
             "test_confusion_matrix": wandb.plot.confusion_matrix(
                 probs=None,
@@ -125,17 +129,20 @@ def compute_log_confusion_matrix(labels, preds, train_mask, test_mask):
                 preds=np.array(
                     pred_classes[test_mask].cpu().flatten()),
                 class_names=["Class 0", "Class 1"],
+                title="Confusion Matrix (Test)"
             ),
             "train_roc_auc": wandb.plot.roc_curve(
                 y_true=np.array(labels[train_mask].cpu().flatten()),
                 y_probas=np.array(
                     roc_preds_train.cpu()),
-                labels=["Class 0", "Class 1"]
+                labels=["Class 0", "Class 1"],
+                title="ROC Curve (Train)"
             ),
             "test_roc_auc": wandb.plot.roc_curve(
                 y_true=np.array(labels[test_mask].cpu().flatten()),
                 y_probas=np.array(roc_preds_test.cpu()),
-                labels=["Class 0", "Class 1"]
+                labels=["Class 0", "Class 1"],
+                title="ROC Curve (Test)"
             )
         }
     )

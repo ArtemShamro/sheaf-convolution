@@ -1,4 +1,7 @@
-import random
+from scipy.sparse import csr_matrix
+import requests
+from scipy.sparse.csgraph import shortest_path
+from networkx import adjacency_matrix
 import networkx as nx
 import torch
 from torch_geometric.datasets import Planetoid
@@ -12,20 +15,23 @@ from tqdm import tqdm
 import pickle
 import hashlib
 import os
+from collections import defaultdict
 
 
-def generate_dataset(name: str = 'Simple', task: str = 'classification', test_size: float = 0.2,
-                     ndata: int = 1000, dimx: int = 10) -> nx.Graph:
-    """
-    task - 'classification' / 'edges_prediction'
-    """
+
+def generate_dataset(name: str = 'Simple', test_size: float = 0.2,
+                     ndata: int = 1000, dimx: int = 10, device='cpu') -> nx.Graph:
     match name:
-        case 'Simple':
-            return generate_simple_data()
         case 'Synthetic':
-            return generate_synthetic_data(ndata, dimx, task, test_size)
-        case 'Cora':
-            return generate_cora_data(task, test_size)
+            return generate_synthetic_data(ndata, dimx, test_size)
+        case 'Cora' | 'Citeseer' | 'PubMed':
+            return generate_planetoid_data(dataset=name, test_size=test_size)
+        case 'movielens':
+            return generate_movielens_data(test_size, device=device)
+        case 'movielens1M':
+            return generate_movielens_1m_data(test_size, device=device)
+        case 'PPI':
+            return generate_ppi_data(test_size, device=device)
         case _:
             raise ValueError(f'Unknown data name: {name}')
 
@@ -37,7 +43,7 @@ def generate_simple_data():
     return G_sim, data_x, data_y, mask, mask
 
 
-def generate_synthetic_data(ndata, dimx, task, test_size=0.2, s_threshold=0.2, nproj=4):
+def generate_synthetic_data(ndata, dimx, test_size=0.15, val_size=0.05, neg_ratio=1, s_threshold=0.2, nproj=4, device='cpu'):
     """
     Generate or load synthetic graph data, saving it to ./datasets/synthetic.
 
@@ -64,7 +70,6 @@ def generate_synthetic_data(ndata, dimx, task, test_size=0.2, s_threshold=0.2, n
     params = {
         'ndata': ndata,
         'dimx': dimx,
-        'task': task,
         'test_size': test_size,
         's_threshold': s_threshold,
         'nproj': nproj
@@ -77,29 +82,30 @@ def generate_synthetic_data(ndata, dimx, task, test_size=0.2, s_threshold=0.2, n
     if os.path.exists(save_path):
         with open(save_path, 'rb') as f:
             data = pickle.load(f)
-        return data['G'], data['data_x'], data['data_y'], data['train_mask'], data['test_mask']
+        return data['G'], data['data_x'], data['adj_mat'], data['train_mask'], data['test_mask']
 
     # Generate new data
     data_x, _, adj_mat, _ = generate_graph(
         ndata, dimx, s_threshold, nproj, nvec=2)
     adj_mat -= np.diag(np.ones(ndata))
     G = nx.from_numpy_array(adj_mat)
-    _, data_y = generate_features_and_labels(ndata, 1, num_classes=1)
-    train_mask, test_mask = get_mask_edge_prediction(G, test_size=test_size)
+    adj_mat = torch.tensor(adj_mat)
+    G_train, train_mask, val_mask, test_mask = get_mask_edge_prediction(
+        G, test_size=test_size, val_size=val_size, neg_ratio=neg_ratio, device=device)
 
     # Save data
     data = {
-        'G': G,
+        'G': G_train,
         'data_x': data_x,
-        'data_y': data_y,
+        'adj_mat': adj_mat,
         'train_mask': train_mask,
         'test_mask': test_mask,
-        'params': params
+        'val_mask': val_mask,
     }
     with open(save_path, 'wb') as f:
         pickle.dump(data, f)
 
-    return G, data_x, data_y, train_mask, test_mask
+    return G_train, data_x, adj_mat, train_mask, test_mask
 
 
 def generate_data(ndata, dimy):
@@ -167,182 +173,17 @@ def generate_graph(ndata, dimx, s_threshold=0.2, nproj=4, nvec=2):
             torch.from_numpy(xproj).float())
 
 
-# def generate_cora_data(task: str = 'classification', test_size: float = 0.2, device: str = 'cpu', neg_ratio: float = 1.0) -> Tuple[nx.Graph, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-#     """
-#     Подготавливает датасет Cora для задачи классификации узлов или восстановления рёбер.
-
-#     Args:
-#         task (str): Тип задачи ('classification' или 'edge_prediction').
-#         test_size (float): Доля рёбер для тестового набора (для edge_prediction).
-#         device (str): Устройство для тензоров ('cpu' или 'cuda').
-#         neg_ratio (float): Доля negative samples для тестового набора относительно тестовых рёбер.
-
-#     Returns:
-#         G (nx.Graph): Граф в формате NetworkX.
-#         graph.x (torch.Tensor): Эмбеддинги вершин (признаки узлов).
-#         graph.y (torch.Tensor): Целевая переменная (метки узлов или матрица смежности).
-#         train_mask (torch.Tensor): Маска для тренировочных данных (все рёбра и negative samples, не вошедшие в тест).
-#         test_mask (torch.Tensor): Маска для тестовых данных.
-#     """
-#     # Загружаем Cora с нормализацией признаков
-#     dataset = Planetoid(root="./datasets/Planetoid/",
-#                         name="Cora", transform=T.NormalizeFeatures())
-#     graph = dataset[0]
-#     num_nodes = graph.num_nodes  # 2708 для Cora
-
-#     # Преобразуем в NetworkX граф (неориентированный)
-#     G = to_networkx(graph, to_undirected=True)
-
-#     if task == 'classification':
-#         # Для классификации узлов используем стандартный сплит Cora
-#         train_mask = graph.train_mask
-#         test_mask = graph.test_mask
-#         return G, graph.x.to(device), graph.y.to(device), train_mask.to(device), test_mask.to(device)
-
-#     elif task == 'edges_prediction':
-#         # Создаём матрицу смежности как целевую переменную
-#         adj_mat = torch.zeros((num_nodes, num_nodes),
-#                               dtype=torch.float, device=device)
-#         edge_index = graph.edge_index.to(device)
-#         # Заполняем матрицу смежности (симметрично, так как граф неориентированный)
-#         adj_mat[edge_index[0], edge_index[1]] = 1
-#         adj_mat[edge_index[1], edge_index[0]] = 1
-
-#         # Получаем список всех рёбер
-#         edges = list(G.edges())
-#         num_edges = len(edges)
-#         random.shuffle(edges)  # Перемешиваем рёбра
-
-#         # Разделяем рёбра на тренировочные и тестовые
-#         num_test_edges = int(num_edges * test_size)
-#         test_edges = edges[:num_test_edges]
-#         train_edges = edges[num_test_edges:]
-
-#         # Создаём negative samples (отсутствующие рёбра)
-#         all_possible_edges = set((i, j) for i in range(num_nodes)
-#                                  for j in range(i + 1, num_nodes))
-#         existing_edges = set((min(u, v), max(u, v)) for u, v in G.edges())
-#         negative_edges = list(all_possible_edges - existing_edges)
-#         random.shuffle(negative_edges)
-
-#         # Выбираем negative samples для теста
-#         num_test_neg = int(num_test_edges * neg_ratio)
-#         test_negative_edges = negative_edges[:num_test_neg]
-#         # Все оставшиеся negative samples идут в тренировочный набор
-#         train_negative_edges = negative_edges[num_test_neg:]
-
-#         # Создаём маски
-#         train_mask = torch.zeros(
-#             (num_nodes, num_nodes), dtype=torch.bool, device=device)
-#         test_mask = torch.zeros((num_nodes, num_nodes),
-#                                 dtype=torch.bool, device=device)
-
-#         # Заполняем тренировочную маску (рёбра и все оставшиеся negative samples)
-#         for u, v in train_edges:
-#             train_mask[u, v] = True
-#             train_mask[v, u] = True  # Симметрия
-#         for u, v in train_negative_edges:
-#             train_mask[u, v] = True
-#             train_mask[v, u] = True
-
-#         # Заполняем тестовую маску
-#         for u, v in test_edges:
-#             test_mask[u, v] = True
-#             test_mask[v, u] = True
-#         for u, v in test_negative_edges:
-#             test_mask[u, v] = True
-#             test_mask[v, u] = True
-
-#         return G, graph.x.to(device), adj_mat, train_mask, test_mask
-
-#     else:
-#         raise ValueError(
-#             f"Unknown task: {task}. Supported tasks: 'classification', 'edge_prediction'.")
-
-# def generate_cora_data(task: str = 'classification', test_size: float = 0.2) -> Tuple[nx.Graph, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-#     PL = Planetoid(root="./datasets/Planetoid/", name="Cora",
-#                    transform=T.NormalizeFeatures())
-#     graph = PL[0]
-
-#     G = to_networkx(graph, to_undirected=True)
-#     if task == 'classification':
-#         return G, graph.x, graph.y, ~graph.test_mask, graph.test_mask
-#     train_mask, test_mask = get_mask_edge_prediction(G, test_size=test_size)
-#     assert torch.all(train_mask == train_mask.T), "Train mask is not symmetric"
-#     assert torch.all(test_mask == test_mask.T), "Test mask is not symmetric"
-#     return G, graph.x, graph.y, train_mask, test_mask
-
-
-def generate_cora_data(task: str = 'edge_prediction', test_size: float = 0.1, val_size: float = 0.05, device: str = 'cpu', neg_ratio: float = 1.0):
+def generate_planetoid_data(dataset: str = 'Cora', test_size: float = 0.1, val_size: float = 0.05, device: str = 'cpu', neg_ratio: float = 1.0):
     dataset = Planetoid(root="./datasets/Planetoid/",
-                        name="Cora", transform=T.NormalizeFeatures())
+                        name=dataset, transform=T.NormalizeFeatures())
     graph = dataset[0]
-    num_nodes = graph.num_nodes
     G = to_networkx(graph, to_undirected=True)
+    adj_mat = torch.tensor(adjacency_matrix(G).toarray())
 
-    if task != 'edges_prediction':
-        raise ValueError("This model supports only edge_prediction")
+    G_train, train_mask, val_mask, test_mask = get_mask_edge_prediction(
+        G, test_size=test_size, val_size=val_size, neg_ratio=neg_ratio, device=device)
 
-    adj_mat = torch.zeros((num_nodes, num_nodes),
-                          dtype=torch.float, device=device)
-    edge_index = graph.edge_index.to(device)
-    adj_mat[edge_index[0], edge_index[1]] = 1
-    adj_mat[edge_index[1], edge_index[0]] = 1
-
-    edges = list(G.edges())
-    num_edges = len(edges)
-    random.shuffle(edges)
-    num_test_edges = int(num_edges * test_size)
-    num_val_edges = int(num_edges * val_size)
-
-    test_edges = edges[:num_test_edges]
-    val_edges = edges[num_test_edges:num_test_edges + num_val_edges]
-
-    all_possible_edges = set((i, j) for i in range(num_nodes)
-                             for j in range(i + 1, num_nodes))
-    existing_edges = set((min(u, v), max(u, v)) for u, v in G.edges())
-    negative_edges = list(all_possible_edges - existing_edges)
-    random.shuffle(negative_edges)
-
-    num_test_neg = int(num_test_edges * neg_ratio)
-    num_val_neg = int(num_val_edges * neg_ratio)
-
-    test_negative_edges = negative_edges[:num_test_neg]
-    val_negative_edges = negative_edges[num_test_neg:num_test_neg + num_val_neg]
-
-    train_mask = torch.ones((num_nodes, num_nodes),
-                            dtype=torch.bool, device=device)
-    val_mask = torch.zeros((num_nodes, num_nodes),
-                           dtype=torch.bool, device=device)
-    test_mask = torch.zeros((num_nodes, num_nodes),
-                            dtype=torch.bool, device=device)
-
-    for u, v in val_edges:
-        val_mask[u, v] = True
-        val_mask[v, u] = True
-        train_mask[u, v] = False
-        train_mask[v, u] = False
-    for u, v in val_negative_edges:
-        val_mask[u, v] = True
-        val_mask[v, u] = True
-        train_mask[u, v] = False
-        train_mask[v, u] = False
-
-    for u, v in test_edges:
-        test_mask[u, v] = True
-        test_mask[v, u] = True
-        train_mask[u, v] = False
-        train_mask[v, u] = False
-    for u, v in test_negative_edges:
-        test_mask[u, v] = True
-        test_mask[v, u] = True
-        train_mask[u, v] = False
-        train_mask[v, u] = False
-
-    G_train = G.copy()
-    G_train.remove_edges_from(test_edges + val_edges)
-
-    return G_train, graph.x.to(device), adj_mat, train_mask,  test_mask
+    return G_train, graph.x.to(device), adj_mat, train_mask, test_mask
 
 
 def generate_features_and_labels(num_nodes, dim_features, num_classes=2):
@@ -351,3 +192,398 @@ def generate_features_and_labels(num_nodes, dim_features, num_classes=2):
     data_x = torch.nn.functional.normalize(data_x, dim=1)
     data_y = torch.randint(0, num_classes, size=(num_nodes, 1))
     return data_x, data_y
+
+from torch_geometric.datasets import MovieLens100K
+def generate_movielens_data(test_size: float = 0.1, 
+                           val_size: float = 0.05, 
+                           device: str = 'cpu', 
+                           neg_ratio: float = 1.0, 
+                           data_dir: str = "./data"):
+    """
+    Loads and processes the MovieLens100K dataset from PyTorch Geometric,
+    transforming it into a homogeneous graph. Handles different feature dimensions
+    for users and movies with separate normalization. Saves the graph to disk with
+    edge weights and loads it if already created.
+
+    Parameters:
+    -----------
+    test_size : float
+        Fraction of edges for test set. Default: 0.1
+    val_size : float
+        Fraction of edges for validation set. Default: 0.05
+    device : str
+        Device to place tensors ('cpu' or 'cuda'). Default: 'cpu'
+    neg_ratio : float
+        Ratio of negative to positive edges for masks. Default: 1.0
+    data_dir : str
+        Directory to store dataset and graph. Default: "./data"
+
+    Returns:
+    --------
+    G_train : networkx.Graph
+        Training graph with train edges
+    node_features : torch.Tensor
+        Node features tensor
+    adj_mat : torch.Tensor
+        Dense adjacency matrix of the graph
+    train_mask : torch.Tensor
+        Boolean mask for training edges
+    test_mask : torch.Tensor
+        Boolean mask for test edges
+    """
+    # File name for saved graph
+    graph_dir = os.path.join(data_dir, "graphs")
+    graph_file = "movielens100k.npz"
+    graph_path = os.path.join(graph_dir, graph_file)
+
+    # Check if graph exists
+    if os.path.exists(graph_path):
+        print(f"Loading existing graph from {graph_path}...")
+        try:
+            data = np.load(graph_path)
+            node_features = torch.tensor(data['node_features'], dtype=torch.float)
+            labels = torch.tensor(data['node_labels'], dtype=torch.long)
+            edges = torch.tensor(data['edges'], dtype=torch.long)
+            edge_weights = torch.tensor(data['edge_weights'], dtype=torch.float)
+        except Exception as e:
+            raise RuntimeError(f"Failed to load graph {graph_path}: {e}")
+    else:
+        # Load MovieLens100K
+        print(f"Loading MovieLens100K dataset...")
+        dataset_pyg = MovieLens100K(root=data_dir)
+        data = dataset_pyg[0]  # HeteroData object
+
+        # Extract user and movie features
+        user_features = data['user'].x
+        movie_features = data['movie'].x
+        edge_index = data['user', 'rates', 'movie'].edge_index
+        edge_label = data['user', 'rates', 'movie'].edge_label
+
+        # Normalize features separately
+        user_features = user_features / (user_features.norm(dim=1, keepdim=True) + 1e-10)
+        movie_features = movie_features / (movie_features.norm(dim=1, keepdim=True) + 1e-10)
+
+        # Align feature dimensions
+        max_dim = max(user_features.shape[1], movie_features.shape[1])
+        if user_features.shape[1] < max_dim:
+            user_features = torch.cat([user_features, torch.zeros(user_features.shape[0], max_dim - user_features.shape[1])], dim=1)
+        if movie_features.shape[1] < max_dim:
+            movie_features = torch.cat([movie_features, torch.zeros(movie_features.shape[0], max_dim - movie_features.shape[1])], dim=1)
+
+        # Add type indicator (0 for users, 1 for movies)
+        user_type = torch.zeros(user_features.shape[0], 1)
+        movie_type = torch.ones(movie_features.shape[0], 1)
+        user_features = torch.cat([user_features, user_type], dim=1)
+        movie_features = torch.cat([movie_features, movie_type], dim=1)
+
+        # Combine features
+        num_users = user_features.shape[0]
+        num_movies = movie_features.shape[0]
+        node_features = torch.cat([user_features, movie_features], dim=0)
+
+        # Create labels (0 for users, 1 for movies)
+        labels = torch.cat([torch.zeros(num_users, dtype=torch.long), torch.ones(num_movies, dtype=torch.long)])
+
+        # Create edges with renumbered indices
+        edges = edge_index.t().clone()
+        edges[:, 1] += num_users  # Shift movie indices
+
+        # Create edge weights (ratings)
+        edge_weights = edge_label.clone()
+
+        # Add reverse edges for undirected graph
+        edges_reverse = edges[:, [1, 0]]
+        edge_weights_reverse = edge_weights.clone()
+        edges = torch.cat([edges, edges_reverse], dim=0)
+        edge_weights = torch.cat([edge_weights, edge_weights_reverse], dim=0)
+
+        # Remove duplicate edges, averaging weights
+        unique_edges, indices = torch.unique(edges, dim=0, return_inverse=True)
+        edge_weights = torch.zeros(unique_edges.shape[0], dtype=torch.float)
+        for i in range(unique_edges.shape[0]):
+            mask = indices == i
+            edge_weights[i] = edge_weights[mask].mean()
+        edges = unique_edges
+
+        # Save graph
+        os.makedirs(graph_dir, exist_ok=True)
+        print(f"Saving graph to {graph_path}...")
+        np.savez(graph_path, 
+                 node_features=node_features.numpy(),
+                 node_labels=labels.numpy(),
+                 edges=edges.numpy(),
+                 edge_weights=edge_weights.numpy())
+
+    # Create NetworkX graph from edges
+    num_nodes = node_features.shape[0]
+    G = nx.Graph()
+    G.add_nodes_from(range(num_nodes))
+    G.add_edges_from(edges.tolist())
+
+    # Create dense adjacency matrix
+    adj_mat = torch.tensor(nx.adjacency_matrix(G).toarray(), dtype=torch.float).to(device)
+
+    # Normalize features (additional normalization for consistency)
+    node_features = node_features / (node_features.sum(dim=1, keepdim=True) + 1e-10)
+    node_features = node_features.to(device)
+
+    # Generate edge masks
+    G_train, train_mask, val_mask, test_mask = get_mask_edge_prediction(
+        G, test_size=test_size, val_size=val_size, neg_ratio=neg_ratio, device=device)
+
+    return G_train, node_features, adj_mat, train_mask, test_mask
+
+
+from torch_geometric.datasets import MovieLens1M
+
+def generate_movielens_1m_data(test_size: float = 0.1, 
+                               val_size: float = 0.05, 
+                               device: str = 'cpu', 
+                               neg_ratio: float = 1.0, 
+                               data_dir: str = "./data"):
+    """
+    Loads and processes the MovieLens1M dataset from PyTorch Geometric,
+    transforming it into a homogeneous graph. Handles different feature dimensions
+    for users and movies with separate normalization. Saves the graph to disk with
+    edge weights and loads it if already created.
+
+    Parameters:
+    -----------
+    test_size : float
+        Fraction of edges for test set. Default: 0.1
+    val_size : float
+        Fraction of edges for validation set. Default: 0.05
+    device : str
+        Device to place tensors ('cpu' or 'cuda'). Default: 'cpu'
+    neg_ratio : float
+        Ratio of negative to positive edges for masks. Default: 1.0
+    data_dir : str
+        Directory to store dataset and graph. Default: "./data"
+
+    Returns:
+    --------
+    G_train : networkx.Graph
+        Training graph with train edges
+    node_features : torch.Tensor
+        Node features tensor
+    adj_mat : torch.Tensor
+        Dense adjacency matrix of the graph
+    train_mask : torch.Tensor
+        Boolean mask for training edges
+    test_mask : torch.Tensor
+        Boolean mask for test edges
+    """
+    # File name for saved graph
+    graph_dir = os.path.join(data_dir, "graphs")
+    graph_file = "movielens1m.npz"
+    graph_path = os.path.join(graph_dir, graph_file)
+
+    # Check if graph exists
+    if os.path.exists(graph_path):
+        print(f"Loading existing graph from {graph_path}...")
+        try:
+            data = np.load(graph_path)
+            node_features = torch.tensor(data['node_features'], dtype=torch.float)
+            labels = torch.tensor(data['node_labels'], dtype=torch.long)
+            edges = torch.tensor(data['edges'], dtype=torch.long)
+            edge_weights = torch.tensor(data['edge_weights'], dtype=torch.float)
+        except Exception as e:
+            raise RuntimeError(f"Failed to load graph {graph_path}: {e}")
+    else:
+        # Load MovieLens1M
+        print(f"Loading MovieLens1M dataset...")
+        dataset_pyg = MovieLens1M(root=data_dir)
+        data = dataset_pyg[0]  # HeteroData object
+
+        # Extract user and movie features
+        user_features = data['user'].x
+        movie_features = data['movie'].x
+        edge_index = data['user', 'rates', 'movie'].edge_index
+        edge_label = data['user', 'rates', 'movie'].edge_label
+
+        # Normalize features separately
+        user_features = user_features / (user_features.norm(dim=1, keepdim=True) + 1e-10)
+        movie_features = movie_features / (movie_features.norm(dim=1, keepdim=True) + 1e-10)
+
+        # Align feature dimensions
+        max_dim = max(user_features.shape[1], movie_features.shape[1])
+        if user_features.shape[1] < max_dim:
+            user_features = torch.cat([user_features, torch.zeros(user_features.shape[0], max_dim - user_features.shape[1])], dim=1)
+        if movie_features.shape[1] < max_dim:
+            movie_features = torch.cat([movie_features, torch.zeros(movie_features.shape[0], max_dim - movie_features.shape[1])], dim=1)
+
+        # Add type indicator (0 for users, 1 for movies)
+        user_type = torch.zeros(user_features.shape[0], 1)
+        movie_type = torch.ones(movie_features.shape[0], 1)
+        user_features = torch.cat([user_features, user_type], dim=1)
+        movie_features = torch.cat([movie_features, movie_type], dim=1)
+
+        # Combine features
+        num_users = user_features.shape[0]
+        num_movies = movie_features.shape[0]
+        node_features = torch.cat([user_features, movie_features], dim=0)
+
+        # Create labels (0 for users, 1 for movies)
+        labels = torch.cat([torch.zeros(num_users, dtype=torch.long), torch.ones(num_movies, dtype=torch.long)])
+
+        # Create edges with renumbered indices
+        edges = edge_index.t().clone()
+        edges[:, 1] += num_users  # Shift movie indices
+
+        # Create edge weights (ratings)
+        edge_weights = edge_label.clone()
+
+        # Add reverse edges for undirected graph
+        edges_reverse = edges[:, [1, 0]]
+        edge_weights_reverse = edge_weights.clone()
+        edges = torch.cat([edges, edges_reverse], dim=0)
+        edge_weights = torch.cat([edge_weights, edge_weights_reverse], dim=0)
+
+        # Remove duplicate edges, averaging weights
+        unique_edges, indices = torch.unique(edges, dim=0, return_inverse=True)
+        edge_weights = torch.zeros(unique_edges.shape[0], dtype=torch.float)
+        for i in range(unique_edges.shape[0]):
+            mask = indices == i
+            edge_weights[i] = edge_weights[mask].mean()
+        edges = unique_edges
+
+        # Save graph
+        os.makedirs(graph_dir, exist_ok=True)
+        print(f"Saving graph to {graph_path}...")
+        np.savez(graph_path, 
+                 node_features=node_features.numpy(),
+                 node_labels=labels.numpy(),
+                 edges=edges.numpy(),
+                 edge_weights=edge_weights.numpy())
+
+    # Create NetworkX graph from edges
+    num_nodes = node_features.shape[0]
+    G = nx.Graph()
+    G.add_nodes_from(range(num_nodes))
+    G.add_edges_from(edges.tolist())
+
+    # Create dense adjacency matrix
+    adj_mat = torch.tensor(nx.adjacency_matrix(G).toarray(), dtype=torch.float).to(device)
+
+    # Normalize features (additional normalization for GAE compatibility)
+    node_features = node_features / (node_features.sum(dim=1, keepdim=True) + 1e-10)
+    node_features = node_features.to(device)
+
+    # Generate edge masks
+    G_train, train_mask, val_mask, test_mask = get_mask_edge_prediction(
+        G, test_size=test_size, val_size=val_size, neg_ratio=neg_ratio, device=device)
+
+    return G_train, node_features, adj_mat, train_mask, test_mask
+
+
+from torch_geometric.datasets import PPI
+from sklearn.cluster import KMeans
+
+def generate_ppi_data(test_size: float = 0.1, 
+                      val_size: float = 0.05, 
+                      device: str = 'cpu', 
+                      neg_ratio: float = 1.0, 
+                      data_dir: str = "./data"):
+    """
+    Loads and processes the PPI dataset (first training graph) from PyTorch Geometric,
+    transforming it into a homogeneous graph. Normalizes node features and adds a node type
+    indicator based on label clustering. Saves the graph to disk and loads it if already created.
+
+    Parameters:
+    -----------
+    test_size : float
+        Fraction of edges for test set. Default: 0.1
+    val_size : float
+        Fraction of edges for validation set. Default: 0.05
+    device : str
+        Device to place tensors ('cpu' or 'cuda'). Default: 'cpu'
+    neg_ratio : float
+        Ratio of negative to positive edges for masks. Default: 1.0
+    data_dir : str
+        Directory to store dataset and graph. Default: "./data"
+
+    Returns:
+    --------
+    G_train : networkx.Graph
+        Training graph with train edges
+    node_features : torch.Tensor
+        Node features tensor
+    adj_mat : torch.Tensor
+        Dense adjacency matrix of the graph
+    train_mask : torch.Tensor
+        Boolean mask for training edges
+    test_mask : torch.Tensor
+        Boolean mask for test edges
+    """
+    # File name for saved graph
+    graph_dir = os.path.join(data_dir, "graphs")
+    graph_file = "ppi.npz"
+    graph_path = os.path.join(graph_dir, graph_file)
+
+    # Check if graph exists
+    if os.path.exists(graph_path):
+        print(f"Loading existing graph from {graph_path}...")
+        try:
+            data = np.load(graph_path)
+            node_features = torch.tensor(data['node_features'], dtype=torch.float)
+            labels = torch.tensor(data['node_labels'], dtype=torch.long)
+            edges = torch.tensor(data['edges'], dtype=torch.long)
+        except Exception as e:
+            raise RuntimeError(f"Failed to load graph {graph_path}: {e}")
+    else:
+        # Load PPI (first training graph)
+        print(f"Loading PPI dataset...")
+        dataset_pyg = PPI(root=data_dir, split='train')
+        data = dataset_pyg[0]  # First training graph
+
+        # Extract node features
+        node_features = data.x  # Shape: [num_nodes, 50]
+
+        # Normalize features
+        node_features = node_features / (node_features.norm(dim=1, keepdim=True) + 1e-10)
+
+        # Create node type indicator using KMeans clustering on labels
+        labels_binary = data.y.cpu().numpy()  # Shape: [num_nodes, 121]
+        kmeans = KMeans(n_clusters=5, random_state=42)
+        node_types = kmeans.fit_predict(labels_binary)
+        node_types = torch.tensor(node_types, dtype=torch.float).reshape(-1, 1)
+        
+        # Combine features with type indicator
+        node_features = torch.cat([node_features, node_types], dim=1)
+
+        # Create labels (node types from clustering)
+        labels = torch.tensor(node_types, dtype=torch.long).squeeze()
+
+        # Create edges
+        edges = data.edge_index.t().clone()
+
+        # Add reverse edges for undirected graph
+        edges_reverse = edges[:, [1, 0]]
+        edges = torch.cat([edges, edges_reverse], dim=0).unique(dim=0)
+
+        # Save graph
+        os.makedirs(graph_dir, exist_ok=True)
+        print(f"Saving graph to {graph_path}...")
+        np.savez(graph_path, 
+                 node_features=node_features.numpy(),
+                 node_labels=labels.numpy(),
+                 edges=edges.numpy())
+
+    # Create NetworkX graph from edges
+    num_nodes = node_features.shape[0]
+    G = nx.Graph()
+    G.add_nodes_from(range(num_nodes))
+    G.add_edges_from(edges.tolist())
+
+    # Create dense adjacency matrix
+    adj_mat = torch.tensor(nx.adjacency_matrix(G).toarray(), dtype=torch.float).to(device)
+
+    # Normalize features (additional normalization for GAE compatibility)
+    node_features = node_features / (node_features.sum(dim=1, keepdim=True) + 1e-10)
+    node_features = node_features.to(device)
+
+    # Generate edge masks
+    G_train, train_mask, val_mask, test_mask = get_mask_edge_prediction(
+        G, test_size=test_size, val_size=val_size, neg_ratio=neg_ratio, device=device)
+
+    return G_train, node_features, adj_mat, train_mask, test_mask

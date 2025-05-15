@@ -25,10 +25,13 @@ class Diffusion(nn.Module):
         # input dim -> hidden_dim
         self.first_linear = nn.Linear(
             config.input_dim, self.hidden_dim, bias=True)
-        nn.init.uniform_(self.first_linear.weight, a=-1, b=1)
+        # nn.init.xavier_uniform_(self.first_linear.weight)
 
         self.maps_builders = nn.ModuleList()
         self.middle_linear = nn.ModuleList()
+        self.last_linear = nn.Linear(
+            self.hidden_dim, self.hidden_dim, bias=True)
+        # nn.init.xavier_uniform_(self.last_linear.weight)
 
         for layer in range(config.n_layers):
             self.maps_builders.append(
@@ -38,8 +41,8 @@ class Diffusion(nn.Module):
                 nn.Sequential(
                     nn.Linear(self.hidden_dim, self.hidden_dim),
                     nn.ELU(),
-                    # nn.LayerNorm(self.hidden_dim),
-                    nn.Linear(self.hidden_dim, self.hidden_dim)
+                    nn.Linear(self.hidden_dim, self.hidden_dim),
+                    nn.ELU()
                 )
             )
 
@@ -74,8 +77,7 @@ class Diffusion(nn.Module):
         num_nodes = x.shape[0]
         x = self.first_linear(x)
 
-        # ADDED
-        x = self.norm(x)
+        # x = self.norm(x)
 
         x = self.act(x)
 
@@ -85,26 +87,17 @@ class Diffusion(nn.Module):
             laplacian = self.laplacian_builder(
                 adj_mat, degrees, maps, edge_index)
 
-            # print(torch.norm(maps, dim=(1, 2)).mean())
-
             dx = self.middle_linear[layer](x)
 
             # Добавлено
-            dx = nn.LayerNorm(self.hidden_dim, device=self.config.device)(dx)
+            # dx = nn.LayerNorm(self.hidden_dim, device=self.config.device)(dx)
 
             dx = torch.matmul(laplacian, dx.reshape(
                 num_nodes * self.config.maps_dim, -1)).reshape(-1, self.hidden_dim)
             x = x - self.alpha[layer] * dx
 
-        # x = nn.LayerNorm(self.hidden_dim, device=self.config.device)(x)
-
-        # print(x.detach())
-        # print("x mean:", x.mean().item())
-        # print("x std:", x.std().item())
-        # print("x min:", x.min().item())
-        # print("x max:", x.max().item())
-        # print("x L2 norm:", torch.norm(x, p=2, dim=1).detach())
         # wandb.log({"x_distribution": wandb.Histogram(
         #     x.cpu().detach().flatten(), num_bins=50)})
+        x = self.last_linear(x)
         x = self.decoder(x)
         return x

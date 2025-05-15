@@ -12,6 +12,7 @@ import torch.nn as nn
 import torch
 import wandb
 import warnings
+import argparse
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -23,9 +24,9 @@ def main(cfg: DictConfig):
 
     wandb.init(
         project="diffusion-gnn",
-        name=f"{cfg.dataset.name}_{cfg.model.task}",
+        name=f"{cfg.model.type}_{cfg.dataset.name}",
         config=OmegaConf.to_container(cfg, resolve=True),
-        tags=[cfg.model.task, cfg.dataset.name]
+        tags=[cfg.model.type, cfg.dataset.name]
     )
 
     model_config = ModelDiffusionConfig(
@@ -36,34 +37,21 @@ def main(cfg: DictConfig):
 
     set_seed(cfg.seed)
 
-    # заменить labels на true_adj_mat, возвращаемую из generate_dataset
     G, data, labels, train_mask, test_mask = generate_dataset(name=cfg.dataset.name,
-                                                              task=cfg.model.task,
                                                               test_size=cfg.dataset.test_size,
                                                               ndata=cfg.dataset.ndata,
                                                               dimx=cfg.dataset.dimx)
 
-    match cfg.model.task:
-        case "edges_prediction":
-            criterion = CustomBCELoss(print_loss=False)
-            # criterion = nn.BCEWithLogitsLoss(pos_weight=650)
-            model_config = replace(
-                model_config,
-                output_dim=1,
-                input_dim=data.shape[1]
-            )
-
-        case "node_classification":
-            criterion = nn.CrossEntropyLoss()
-            model_config = replace(
-                model_config,
-                output_dim=labels.unique().shape[0],
-                input_dim=data.shape[1]
-            )
+    criterion = CustomBCELoss(print_loss=False)
+    model_config = replace(
+        model_config,
+        output_dim=1,
+        input_dim=data.shape[1]
+    )
 
     model = Diffusion(model_config).to(
         device) if cfg.model.type == "diffusion" else GAE(config=model_config).to(device)
-
+    print("MAIN : model = ", type(model))
     wandb.watch(model, log="all", log_freq=50)
 
     optimizer = torch.optim.Adam(
@@ -72,7 +60,8 @@ def main(cfg: DictConfig):
         weight_decay=cfg.optimizer.weight_decay,
         amsgrad=True
     )
-    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=300)
 
     metric_logger = MetricLogger(device)
 
@@ -81,7 +70,8 @@ def main(cfg: DictConfig):
         data.to(device), labels.to(device), G, optimizer,
         mask=(train_mask, test_mask),
         metric_logger=metric_logger,
-        early_stop_iters=cfg.optimizer.early_stop_iters
+        early_stop_iters=cfg.optimizer.early_stop_iters,
+        scheduler=scheduler
     )  # scheduler=scheduler
 
     for name, param in model.named_parameters():
