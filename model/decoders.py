@@ -26,6 +26,25 @@ class MLPDecoder(nn.Module):
         adj_mat = adj_mat + adj_mat.T
         return adj_mat
 
+# class MLPDecoder(nn.Module):
+#     def __init__(self, in_dim, dropout=0.0):
+#         super().__init__()
+#         self.mlp = nn.Sequential(
+#             nn.Linear(in_dim * 2, in_dim),
+#             nn.ReLU(),
+#             nn.Dropout(dropout),
+#             nn.Linear(in_dim, 1)
+#         )
+    
+#     def forward(self, x, edge_index, node_types):
+#         # Filter user-movie edges
+#         valid = ((node_types[edge_index[0]] == 0) & (node_types[edge_index[1]] == 1)) | \
+#                 ((node_types[edge_index[0]] == 1) & (node_types[edge_index[1]] == 0))
+#         edge_index = edge_index[:, valid]
+#         x_row = x[edge_index[0]]
+#         x_col = x[edge_index[1]]
+#         probs = self.mlp(torch.cat([x_row, x_col], dim=1)).squeeze()
+#         return probs, valid
 
 class DotProductDecoder(nn.Module):
     def __init__(self):

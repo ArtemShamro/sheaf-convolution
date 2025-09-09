@@ -20,15 +20,15 @@ hydra:
     params:
       # epochs: range(10, 50, step=20)
 
-seed: 39
-epochs: 3000
+seed: 42
+epochs: 300
 
 model:
-  type: gcn # "diffusion", "gcn"
-  decoder: dot_product # "dot_product", "bilinear", "mlp"
+  type: diffusion # "diffusion", "gcn"
+  decoder: mlp # "dot_product", "bilinear", "mlp"
   n_layers: 2
-  hidden_chanels: 10
-  maps_dim: 3
+  hidden_chanels: 30
+  maps_dim: 2
   dropout: 0.1
   decoder_dropout: 0.0
 
@@ -36,12 +36,12 @@ optimizer:
   lr: 1e-2
   weight_decay: 1e-5
   early_stop: True
-  early_stop_iters: 20
+  early_stop_iters: 40
 
 dataset:
   # "Synthetic", "Cora", "Citeseer", "PubMed", "movielens1M"
   name: movielens1M
-  test_size: 0.2
+  test_size: 0.1
   # used for Synthetic dataset only:
   ndata: 500
   dimx: 20

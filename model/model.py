@@ -23,9 +23,15 @@ class Diffusion(nn.Module):
         self.hidden_dim = config.hidden_chanels * config.maps_dim
 
         # input dim -> hidden_dim
-        self.first_linear = nn.Linear(
-            config.input_dim, self.hidden_dim, bias=True)
+        # self.first_linear = nn.Linear(
+        #     config.input_dim, self.hidden_dim, bias=True)
         # nn.init.xavier_uniform_(self.first_linear.weight)
+        self.first_linear = nn.Sequential(
+                    nn.Linear(config.input_dim, self.hidden_dim * 2),
+                    nn.ELU(),
+                    nn.Linear(self.hidden_dim * 2, self.hidden_dim),
+                    nn.ELU()
+        )
 
         self.maps_builders = nn.ModuleList()
         self.middle_linear = nn.ModuleList()
@@ -68,7 +74,14 @@ class Diffusion(nn.Module):
                 )
 
         self.norm = nn.LayerNorm(self.hidden_dim)
-
+        # self._initialize_weights()
+    
+    def _initialize_weights(self):
+        for m in self.middle_linear:
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                nn.init.zeros_(m.bias)
+    
     def forward(self, x, G: nx.Graph):
 
         adj_mat = get_adj_mat(G, self.config.device)
