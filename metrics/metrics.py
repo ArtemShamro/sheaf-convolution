@@ -1,10 +1,12 @@
 import torch
 import wandb
+from metrics.comet_logger import get_experiment
 from torchmetrics import Accuracy, Precision, Recall, F1Score, AUROC, Metric, AveragePrecision
 from sklearn.metrics import confusion_matrix
 import numpy as np
 
 
+experiment = get_experiment()
 class MetricLogger:
     def __init__(self, device, task="binary"):
         self.metrics = {
@@ -33,9 +35,8 @@ class MetricLogger:
         log_dict = {"epoch": epoch}
         for split, metrics in metrics_dict.items():
             for k, v in metrics.items():
-                log_dict[f"{split}/{k}"] = v if isinstance(
-                    v, float) else v.item()
-        wandb.log(log_dict, step=epoch)
+                value = v if isinstance(v, float) else v.item()
+                experiment.log_metric(f"{split}/{k}", value, step=epoch)
 
 
 class MultiMetric(Metric):
@@ -95,8 +96,7 @@ class LayerwiseGradNormMetric(Metric):
             if param.grad is not None:
                 grad_norm = param.grad.norm().item()
                 self.grad_norms[name].append(grad_norm)
-            wandb.log({f"grad_norm/{name}": grad_norm},
-                      step=epoch)
+                experiment.log_metric(f"grad_norm/{name}", grad_norm, step=epoch)
 
     def compute(self):
         return self.grad_norms
@@ -108,41 +108,17 @@ class LayerwiseGradNormMetric(Metric):
 def compute_log_confusion_matrix(labels, preds, train_mask, test_mask):
     pred_classes = (preds > 0.5).int()
     neg_preds = 1 - preds
-    roc_preds_train = torch.vstack(
-        [neg_preds[train_mask].flatten(), preds[train_mask].flatten()]).T
-    roc_preds_test = torch.vstack(
-        [neg_preds[test_mask].flatten(), preds[test_mask].flatten()]).T
-    wandb.log(
-        {
-            "train_confusion_matrix": wandb.plot.confusion_matrix(
-                probs=None,
-                y_true=np.array(labels[train_mask].cpu().flatten()).tolist(),
-                preds=np.array(
-                    pred_classes[train_mask].cpu().flatten()).tolist(),
-                class_names=["Class 0", "Class 1"],
-                title="Confusion Matrix (Train)"
-            ),
-            "test_confusion_matrix": wandb.plot.confusion_matrix(
-                probs=None,
-                y_true=np.array(
-                    labels[test_mask].cpu().flatten()),
-                preds=np.array(
-                    pred_classes[test_mask].cpu().flatten()),
-                class_names=["Class 0", "Class 1"],
-                title="Confusion Matrix (Test)"
-            ),
-            "train_roc_auc": wandb.plot.roc_curve(
-                y_true=np.array(labels[train_mask].cpu().flatten()),
-                y_probas=np.array(
-                    roc_preds_train.cpu()),
-                labels=["Class 0", "Class 1"],
-                title="ROC Curve (Train)"
-            ),
-            "test_roc_auc": wandb.plot.roc_curve(
-                y_true=np.array(labels[test_mask].cpu().flatten()),
-                y_probas=np.array(roc_preds_test.cpu()),
-                labels=["Class 0", "Class 1"],
-                title="ROC Curve (Test)"
-            )
-        }
+    
+    experiment.log_confusion_matrix(
+        y_true=labels[train_mask].cpu().numpy(),
+        y_predicted=pred_classes[train_mask].cpu().numpy(),
+        title="Confusion Matrix (Train)",
+        file_name="train_confusion_matrix.json"
+    )
+
+    experiment.log_confusion_matrix(
+        y_true=labels[test_mask].cpu().numpy(),
+        y_predicted=pred_classes[test_mask].cpu().numpy(),
+        title="Confusion Matrix (Test)",
+        file_name="test_confusion_matrix.json"
     )

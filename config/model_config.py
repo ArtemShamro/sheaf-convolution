@@ -5,6 +5,18 @@ from typing import Optional, Literal
 
 @dataclass
 class ModelDiffusionConfig():
+    
+    
+    input_dim: int
+    hidden_chanels: int
+    maps_dim: int
+    output_dim: int
+    device: torch.device
+    A: torch.Tensor
+    degrees: torch.Tensor
+    edge_index: torch.Tensor
+
+
     type: Literal["diffusion", "VGAE"] = "diffusion"
     task: Literal["edges_prediction",
                   "node_classification"] = "edges_prediction"
@@ -14,11 +26,3 @@ class ModelDiffusionConfig():
     dropout: float = 0
     decoder_dropout: float = 0
     n_layers: int = 2
-    input_dim: Optional[int] = None
-    hidden_chanels: Optional[int] = None
-    maps_dim: Optional[int] = None
-    output_dim: Optional[int] = None
-    device: Optional[torch.device] = None
-    A: Optional[torch.tensor] = None
-    degrees: Optional[torch.tensor] = None
-    edge_index: Optional[torch.tensor] = None

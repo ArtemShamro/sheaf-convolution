@@ -1,3 +1,4 @@
+import comet_ml
 from model.model import Diffusion, ModelDiffusionConfig
 from metrics.metrics import MetricLogger
 from model.baseline_model import GAE
@@ -10,23 +11,23 @@ import hydra
 from dataclasses import replace
 import torch.nn as nn
 import torch
-import wandb
+from metrics.comet_logger import get_experiment
+from comet_ml.integration.pytorch import log_model
+from comet_ml.integration.pytorch import watch
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
-
 
 @hydra.main(config_path="config", config_name="config", version_base=None)
 def main(cfg: DictConfig):
     print('Hydra Config:\n')
     print(OmegaConf.to_yaml(cfg))
+    experiment = get_experiment()
+    experiment.set_name(f"{cfg.model.type}_{cfg.dataset.name}")
 
-    wandb.init(
-        project="diffusion-gnn",
-        name=f"{cfg.model.type}_{cfg.dataset.name}",
-        config=OmegaConf.to_container(cfg, resolve=True),
-        tags=[cfg.model.type, cfg.dataset.name]
-    )
+    experiment.log_parameters(OmegaConf.to_container(cfg, resolve=True))
+
+    experiment.add_tags([cfg.model.type, cfg.dataset.name])
 
     model_config = ModelDiffusionConfig(
         **OmegaConf.to_container(cfg.model, resolve=True))
@@ -51,7 +52,8 @@ def main(cfg: DictConfig):
     model = Diffusion(model_config).to(
         device) if cfg.model.type == "diffusion" else GAE(config=model_config).to(device)
     print("MAIN : model = ", type(model))
-    wandb.watch(model, log="all", log_freq=50)
+    log_model(experiment, model=model, model_name="TheModel")
+    watch(model)
 
     optimizer = torch.optim.Adam(
         model.parameters(),
@@ -76,8 +78,6 @@ def main(cfg: DictConfig):
     for name, param in model.named_parameters():
         if "alpha" in name:
             print(f"{name}: {param.data:.2f}")
-
-    wandb.finish()
 
     return best_test_accuracy
 

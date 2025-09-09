@@ -25,7 +25,7 @@ epochs: 300
 
 model:
   type: diffusion # "diffusion", "gcn"
-  decoder: mlp # "dot_product", "bilinear", "mlp"
+  decoder: dot_product # "dot_product", "bilinear", "mlp"
   n_layers: 2
   hidden_chanels: 30
   maps_dim: 2
