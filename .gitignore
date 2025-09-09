@@ -1,6 +1,8 @@
 # Datasets
 datasets/
 
+data/
+
 # Logs
 wandb/
 multirun/
