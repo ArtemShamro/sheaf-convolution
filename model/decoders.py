@@ -35,7 +35,7 @@ class MLPDecoder(nn.Module):
 #             nn.Dropout(dropout),
 #             nn.Linear(in_dim, 1)
 #         )
-    
+
 #     def forward(self, x, edge_index, node_types):
 #         # Filter user-movie edges
 #         valid = ((node_types[edge_index[0]] == 0) & (node_types[edge_index[1]] == 1)) | \
@@ -46,13 +46,15 @@ class MLPDecoder(nn.Module):
 #         probs = self.mlp(torch.cat([x_row, x_col], dim=1)).squeeze()
 #         return probs, valid
 
+
 class DotProductDecoder(nn.Module):
     def __init__(self):
         super().__init__()
 
     def forward(self, x: torch.Tensor):
-        adj_logits = torch.mm(x, x.t())  # [num_nodes, num_nodes]
-        return adj_logits  # Вероятности рёбер
+        adj_logits = x @ x.t()      # [n, n]
+        adj_logits.fill_diagonal_(float('-inf'))
+        return adj_logits
 
 
 class BilinearDecoder(nn.Module):

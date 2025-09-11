@@ -24,8 +24,6 @@ class GAE(nn.Module):
         # Для скрытых представлений
         self.conv2 = GCNConv(hidden_dim1, hidden_dim2)
 
-        # self.decoder = BilinearDecoder(hidden_dim2)
-
     def encode(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
         """
         Энкодер: вычисляет скрытые представления вершин.

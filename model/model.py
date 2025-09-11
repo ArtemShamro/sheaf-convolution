@@ -9,8 +9,6 @@ from model.laplacian_builder import LaplacianBuilder
 from model.decoders import MLPDecoder, DotProductDecoder, BilinearDecoder
 from utils import build_masks, get_adj_mat, get_degrees_and_edges
 
-import wandb
-
 
 class Diffusion(nn.Module):
     def __init__(self, config: ModelDiffusionConfig):
@@ -27,10 +25,10 @@ class Diffusion(nn.Module):
         #     config.input_dim, self.hidden_dim, bias=True)
         # nn.init.xavier_uniform_(self.first_linear.weight)
         self.first_linear = nn.Sequential(
-                    nn.Linear(config.input_dim, self.hidden_dim * 2),
-                    nn.ELU(),
-                    nn.Linear(self.hidden_dim * 2, self.hidden_dim),
-                    nn.ELU()
+            nn.Linear(config.input_dim, self.hidden_dim * 2),
+            nn.ELU(),
+            nn.Linear(self.hidden_dim * 2, self.hidden_dim),
+            nn.ELU()
         )
 
         self.maps_builders = nn.ModuleList()
@@ -75,13 +73,13 @@ class Diffusion(nn.Module):
 
         self.norm = nn.LayerNorm(self.hidden_dim)
         # self._initialize_weights()
-    
+
     def _initialize_weights(self):
         for m in self.middle_linear:
             if isinstance(m, nn.Linear):
                 nn.init.xavier_uniform_(m.weight)
                 nn.init.zeros_(m.bias)
-    
+
     def forward(self, x, G: nx.Graph):
 
         adj_mat = get_adj_mat(G, self.config.device)

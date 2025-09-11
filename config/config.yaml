@@ -23,6 +23,8 @@ hydra:
 seed: 42
 epochs: 300
 
+task: "edges_prediction" # "node_classification"
+
 model:
   type: diffusion # "diffusion", "gcn"
   decoder: dot_product # "dot_product", "bilinear", "mlp"

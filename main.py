@@ -23,14 +23,15 @@ def main(cfg: DictConfig):
     print('Hydra Config:\n')
     print(OmegaConf.to_yaml(cfg))
     experiment = get_experiment()
+    task = cfg.task
     experiment.set_name(f"{cfg.model.type}_{cfg.dataset.name}")
 
-    experiment.log_parameters(OmegaConf.to_container(cfg, resolve=True))
+    experiment.log_parameters(OmegaConf.to_container(cfg, resolve=True)) #type:ignore
 
     experiment.add_tags([cfg.model.type, cfg.dataset.name])
 
     model_config = ModelDiffusionConfig(
-        **OmegaConf.to_container(cfg.model, resolve=True))
+        **OmegaConf.to_container(cfg.model, resolve=True)) #type:ignore
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model_config.device = device
@@ -43,11 +44,8 @@ def main(cfg: DictConfig):
                                                               dimx=cfg.dataset.dimx)
 
     criterion = CustomBCELoss(print_loss=False)
-    model_config = replace(
-        model_config,
-        output_dim=1,
-        input_dim=data.shape[1]
-    )
+    model_config.input_dim = data.shape[1]
+    model_config.output_dim = 1
 
     model = Diffusion(model_config).to(
         device) if cfg.model.type == "diffusion" else GAE(config=model_config).to(device)

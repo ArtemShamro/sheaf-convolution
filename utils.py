@@ -28,7 +28,7 @@ def build_masks(adj_mat):
     return mask_diag, mask_ul, mask_triu, mask_tril
 
 
-def get_adj_mat(G: nx.Graph, device='cpu'):
+def get_adj_mat(G: nx.Graph, device : torch.device):
     adj_matrix = nx.to_numpy_array(G)
     adj_matrix = torch.tensor(adj_matrix).float().to(device)
     return adj_matrix
