@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
 from sklearn.metrics import roc_curve, auc
+import os
 
 
 def set_seed(seed: int):
@@ -18,6 +19,7 @@ def set_seed(seed: int):
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+    os.environ["PYTHONHASHSEED"] = str(seed)
 
 
 def build_masks(adj_mat):
@@ -28,14 +30,14 @@ def build_masks(adj_mat):
     return mask_diag, mask_ul, mask_triu, mask_tril
 
 
-def get_adj_mat(G: nx.Graph, device : torch.device):
+def get_adj_mat(G: nx.Graph, device: torch.device):
     adj_matrix = nx.to_numpy_array(G)
     adj_matrix = torch.tensor(adj_matrix).float().to(device)
     return adj_matrix
 
 
-def get_degrees_and_edges(G: nx.Graph, device='cpu'):
-    degrees = np.array(list(dict(G.degree()).values()))
+def get_degrees_and_edges(G: nx.Graph, device: torch.device):
+    degrees = np.array(list(dict(G.degree()).values()))  # type: ignore
     degrees = torch.tensor(degrees).float().to(device)
     edge_index = torch.tensor(
         list(G.edges) + [(v, u) for (u, v) in list(G.edges)]).T.to(device)
@@ -89,7 +91,7 @@ def get_mask_node_classification(G: nx.Graph, device: torch.device):
     return torch.tensor(train_vert_mask).to(device), torch.tensor(test_vert_mask).to(device)
 
 
-def draw_graph(G: nx.Graph, data_y=None, data_x: np.array = None):
+def draw_graph(G: nx.Graph, data_y=None, data_x: np.ndarray | None = None):
     plt.figure(figsize=(16, 8))
     pos = nx.spring_layout(G, seed=42)
     if data_y is not None:
@@ -108,7 +110,7 @@ def draw_graph(G: nx.Graph, data_y=None, data_x: np.array = None):
     plt.show(block=False)
 
 
-def get_mask_edge_prediction(G: nx.Graph, test_size: float = None, val_size: float = None, neg_ratio=1, device: str = 'cpu'):
+def get_mask_edge_prediction(G: nx.Graph, test_size: float, val_size: float, neg_ratio: float = 1.0, device: str = 'cpu'):
     num_nodes = G.number_of_nodes()
     edges = list(G.edges())
     num_edges = len(edges)
@@ -242,7 +244,7 @@ class VGAELoss(nn.Module):
         super().__init__()
         self.print_loss = print_loss
 
-    def forward(self, logits: torch.Tensor, labels: torch.Tensor, mu: torch.Tensor, logvar: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
+    def forward(self, logits: torch.Tensor, labels: torch.Tensor, mu: torch.Tensor, logvar: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
         """
         Вычисляет ELBO: -BCE - KL-дивергенция.
 

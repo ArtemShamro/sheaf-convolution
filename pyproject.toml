@@ -19,6 +19,7 @@ dependencies = [
     "torchmetrics==1.6.1",
     "tqdm==4.66.4",
     "comet-ml>=3.52.1",
+    "seaborn>=0.13.2",
 ]
 
 [[tool.uv.index]]

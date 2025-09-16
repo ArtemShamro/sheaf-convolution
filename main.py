@@ -1,55 +1,54 @@
 import comet_ml
-from model.model import Diffusion, ModelDiffusionConfig
 from metrics.metrics import MetricLogger
 from model.baseline_model import GAE
 from dataloader.dataloader import generate_dataset
-from config.model_config import ModelDiffusionConfig
-from utils import set_seed, get_adj_mat, CustomBCELoss
+from utils import set_seed, CustomBCELoss
 from train import train
 from omegaconf import OmegaConf, DictConfig
 import hydra
-from dataclasses import replace
-import torch.nn as nn
+from hydra.utils import instantiate
 import torch
 from metrics.comet_logger import get_experiment
-from comet_ml.integration.pytorch import log_model
-from comet_ml.integration.pytorch import watch
-import warnings
-warnings.filterwarnings("ignore", category=FutureWarning)
-warnings.filterwarnings("ignore", category=UserWarning)
+from comet_ml.integration.pytorch import log_model, watch
+import logging
+
 
 @hydra.main(config_path="config", config_name="config", version_base=None)
 def main(cfg: DictConfig):
-    print('Hydra Config:\n')
-    print(OmegaConf.to_yaml(cfg))
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s - %(message)s"
+    )
+    logger = logging.getLogger(__name__)
+    logger.info(f'Hydra Config:\n {OmegaConf.to_yaml(cfg)}')
+
+    # Конфиг модели
+    # model_config = ModelDiffusionConfig(
+    #     **OmegaConf.to_container(cfg.model, resolve=True))  # type:ignore
+
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    # model_config.device = device
+
+    if cfg.seed != 0:
+        set_seed(cfg.seed)
+
+    # Загружаем датасет (только data и число признаков)
+    data, in_channels = generate_dataset(
+        name=cfg.dataset.name,
+        device=device
+    )
+
+    model = instantiate(cfg.model, input_dim=in_channels,
+                        device=device).to(device)
+    model_name = model.__class__.__name__
+
     experiment = get_experiment()
-    task = cfg.task
-    experiment.set_name(f"{cfg.model.type}_{cfg.dataset.name}")
+    experiment.set_name(f"{model_name}_{cfg.dataset.name}")
+    experiment.log_parameters(OmegaConf.to_container(
+        cfg, resolve=True))  # type:ignore
+    experiment.add_tags([model_name, cfg.dataset.name])
 
-    experiment.log_parameters(OmegaConf.to_container(cfg, resolve=True)) #type:ignore
-
-    experiment.add_tags([cfg.model.type, cfg.dataset.name])
-
-    model_config = ModelDiffusionConfig(
-        **OmegaConf.to_container(cfg.model, resolve=True)) #type:ignore
-
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model_config.device = device
-
-    set_seed(cfg.seed)
-
-    G, data, labels, train_mask, test_mask = generate_dataset(name=cfg.dataset.name,
-                                                              test_size=cfg.dataset.test_size,
-                                                              ndata=cfg.dataset.ndata,
-                                                              dimx=cfg.dataset.dimx)
-
-    criterion = CustomBCELoss(print_loss=False)
-    model_config.input_dim = data.shape[1]
-    model_config.output_dim = 1
-
-    model = Diffusion(model_config).to(
-        device) if cfg.model.type == "diffusion" else GAE(config=model_config).to(device)
-    print("MAIN : model = ", type(model))
     log_model(experiment, model=model, model_name="TheModel")
     watch(model)
 
@@ -59,23 +58,23 @@ def main(cfg: DictConfig):
         weight_decay=cfg.optimizer.weight_decay,
         amsgrad=True
     )
+
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=300)
 
     metric_logger = MetricLogger(device)
 
+    # Обучение
     best_test_accuracy = train(
-        cfg.epochs, model, criterion,
-        data.to(device), labels.to(device), G, optimizer,
-        mask=(train_mask, test_mask),
+        cfg.epochs,
+        model,
+        CustomBCELoss(print_loss=False),
+        data.to(device),              # <--- теперь только data
+        optimizer,
         metric_logger=metric_logger,
         early_stop_iters=cfg.optimizer.early_stop_iters,
         scheduler=scheduler
-    )  # scheduler=scheduler
-
-    for name, param in model.named_parameters():
-        if "alpha" in name:
-            print(f"{name}: {param.data:.2f}")
+    )
 
     return best_test_accuracy
 

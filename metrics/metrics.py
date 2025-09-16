@@ -1,12 +1,21 @@
+import os
+import tempfile
+from sklearn.metrics import precision_recall_curve
+import matplotlib.pyplot as plt
+import logging
+from sklearn.metrics import roc_curve, precision_recall_curve
 import torch
 import wandb
 from metrics.comet_logger import get_experiment
 from torchmetrics import Accuracy, Precision, Recall, F1Score, AUROC, Metric, AveragePrecision
+from torchmetrics.classification import BinaryROC, BinaryPrecisionRecallCurve
 from sklearn.metrics import confusion_matrix
 import numpy as np
 
 
 experiment = get_experiment()
+
+
 class MetricLogger:
     def __init__(self, device, task="binary"):
         self.metrics = {
@@ -96,7 +105,8 @@ class LayerwiseGradNormMetric(Metric):
             if param.grad is not None:
                 grad_norm = param.grad.norm().item()
                 self.grad_norms[name].append(grad_norm)
-                experiment.log_metric(f"grad_norm/{name}", grad_norm, step=epoch)
+                experiment.log_metric(
+                    f"grad_norm/{name}", grad_norm, step=epoch)
 
     def compute(self):
         return self.grad_norms
@@ -105,20 +115,83 @@ class LayerwiseGradNormMetric(Metric):
         self.grad_norms = {name: [] for name in self.layer_names}
 
 
+def compute_confusion_matrix_torch(y_true: torch.Tensor, y_pred: torch.Tensor):
+    # предполагаем бинарную классификацию (0/1)
+    tp = ((y_true == 1) & (y_pred == 1)).sum().item()
+    tn = ((y_true == 0) & (y_pred == 0)).sum().item()
+    fp = ((y_true == 0) & (y_pred == 1)).sum().item()
+    fn = ((y_true == 1) & (y_pred == 0)).sum().item()
+    return [[tn, fp], [fn, tp]]
+
+
 def compute_log_confusion_matrix(labels, preds, train_mask, test_mask):
     pred_classes = (preds > 0.5).int()
-    neg_preds = 1 - preds
-    
+
+    # train
+    cm_train = compute_confusion_matrix_torch(
+        labels[train_mask], pred_classes[train_mask])
     experiment.log_confusion_matrix(
-        y_true=labels[train_mask].cpu().numpy(),
-        y_predicted=pred_classes[train_mask].cpu().numpy(),
+        matrix=cm_train,
+        labels=["0", "1"],
         title="Confusion Matrix (Train)",
         file_name="train_confusion_matrix.json"
     )
 
+    # test
+    cm_test = compute_confusion_matrix_torch(
+        labels[test_mask], pred_classes[test_mask])
     experiment.log_confusion_matrix(
-        y_true=labels[test_mask].cpu().numpy(),
-        y_predicted=pred_classes[test_mask].cpu().numpy(),
+        matrix=cm_test,
+        labels=["0", "1"],
         title="Confusion Matrix (Test)",
         file_name="test_confusion_matrix.json"
     )
+
+
+def log_curves_to_comet(probs, targets, split: str):
+    # считаем метрики на GPU
+    roc_metric = BinaryROC()
+    pr_metric = BinaryPrecisionRecallCurve()
+    roc_metric.update(probs, targets)
+    pr_metric.update(probs, targets)
+
+    fpr, tpr, _ = roc_metric.compute()
+    precision_torch, recall_torch, _ = pr_metric.compute()
+
+    # считаем PR ещё раз через sklearn для совместимости (если нужно)
+    precision, recall, _ = precision_recall_curve(
+        targets.cpu().numpy(), probs.cpu().numpy()
+    )
+
+    # === ROC plot ===
+    plt.figure()
+    plt.plot(fpr.cpu().numpy(), tpr.cpu().numpy(), label="ROC curve")
+    plt.plot([0, 1], [0, 1], "k--")
+    plt.xlabel("False Positive Rate")
+    plt.ylabel("True Positive Rate")
+    plt.title(f"{split} ROC curve")
+    plt.legend(loc="lower right")
+
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmpfile:
+        plt.savefig(tmpfile.name)
+        experiment.log_image(tmpfile.name, name=f"{split}_roc_curve.png")
+    plt.close()
+
+    # === Precision-Recall plot ===
+    plt.figure()
+    plt.plot(recall, precision, label="PR curve (sklearn)")
+    plt.xlabel("Recall")
+    plt.ylabel("Precision")
+    plt.title(f"{split} Precision-Recall curve")
+    plt.legend(loc="lower left")
+
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmpfile:
+        plt.savefig(tmpfile.name)
+        experiment.log_image(tmpfile.name, name=f"{split}_pr_curve.png")
+    plt.close()
+
+    # подчистим временные файлы
+    try:
+        os.remove(tmpfile.name)
+    except:
+        pass

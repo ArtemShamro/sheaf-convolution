@@ -1,0 +1,6 @@
+_target_: model.model.Diffusion
+hidden_chanels: 32 
+maps_dim: 2
+n_layers: 2
+dropout: 0.2
+decoder: 'dot_product'
