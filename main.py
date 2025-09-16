@@ -52,7 +52,7 @@ def main(cfg: DictConfig):
     log_model(experiment, model=model, model_name="TheModel")
     watch(model)
 
-    optimizer = torch.optim.Adam(
+    optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=cfg.optimizer.lr,
         weight_decay=cfg.optimizer.weight_decay,
@@ -60,7 +60,7 @@ def main(cfg: DictConfig):
     )
 
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=300)
+        optimizer, T_max=cfg.epochs)
 
     metric_logger = MetricLogger(device)
 

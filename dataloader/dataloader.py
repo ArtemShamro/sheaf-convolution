@@ -2,7 +2,7 @@ from torch_geometric.utils import train_test_split_edges
 from torch_geometric.datasets import Planetoid
 from dataloader.synthetic import generate_synthetic_pyg
 import torch_geometric.transforms as T
-from dataloader.other import generate_movielens100k, generate_heterophilous_graph
+from dataloader.other import generate_movielens100k, generate_heterophilous_graph, generate_movielens1m
 
 
 def generate_dataset(name: str = 'Cora', device: str = 'cpu'):
@@ -16,6 +16,8 @@ def generate_dataset(name: str = 'Cora', device: str = 'cpu'):
             return generate_synthetic_pyg(1000, 4, device=device)
         case 'Movielens100K':
             return generate_movielens100k(device=device)
+        case 'Movielens1M':
+            return generate_movielens1m(device=device)
         case 'roman-empire' | 'amazon-ratings' | 'minesweeper' | 'tolokers' | 'questions':
             return generate_heterophilous_graph(name=name, device=device)
         case _:
