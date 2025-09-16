@@ -76,8 +76,8 @@ class LaplacianBuilder(nn.Module):
 
 class SparseLaplacianBuilder(nn.Module):
     """
-    Сборка разреженного sheaf-Лапласиана как sparse COO матрицы.
-    Возвращает torch.sparse_coo_tensor размера [(n*d), (n*d)].
+    Разрежённая сборка sheaf-лапласиана L \in R^{(n d) x (n d)} в формате COO,
+    БЕЗ питон-циклов по узлам/рёбрам.
     """
 
     def __init__(self, device):
@@ -86,60 +86,88 @@ class SparseLaplacianBuilder(nn.Module):
 
     def forward(self, maps, edge_index, num_nodes: int):
         """
-        maps:       [2E, d, d]   (первые E — R_ij, вторые E — R_ji)
-        edge_index: [2, 2E]      (ориентированный)
+        maps:       [2E, d, d] (первые E — R_ij, вторые E — R_ji)
+        edge_index: [2, 2E]    (ориентированный; вторые E — обратные)
         num_nodes:  int
         """
         device = self.device
         n = num_nodes
         d = maps.size(1)
         twoE = maps.size(0)
-        assert twoE % 2 == 0
+        assert twoE % 2 == 0, "maps должен содержать пары ориентированных рёбер (2E)."
         E = twoE // 2
 
-        row, col = edge_index[:, :E]      # [E]
-        left_maps = maps[:E]              # [E, d, d] (R_ij)
-        right_maps = maps[E:]             # [E, d, d] (R_ji)
-
-        # --- Диагональные блоки ---
-        diag_contrib = torch.bmm(maps.transpose(1, 2), maps)  # [2E,d,d]
+        # ----- Диагональные блоки: D_i = sum_{e: i->*} R_e^T R_e -----
+        row_all = edge_index[0]                                     # [2E]
+        diag_contrib = torch.bmm(maps.transpose(
+            1, 2), maps)        # [2E, d, d]
         maps_diag = torch.zeros(n, d, d, device=device)
-        maps_diag.index_add_(0, edge_index[0],
-                             diag_contrib)  # суммируем по исходящим
+        maps_diag.view(n, -1).index_add_(0, row_all,
+                                         diag_contrib.reshape(twoE, -1))
+        maps_diag = maps_diag  # [n, d, d]
 
-        # --- Внедиагональные блоки ---
-        maps_triu = torch.bmm(left_maps.transpose(1, 2), right_maps)  # [E,d,d]
+        # ----- Внедиагональные блоки (верхний треугольник): -R_ij^T R_ji -----
+        row, col = edge_index[:, :E]       # [E], [E]
+        left_maps = maps[:E]              # [E, d, d] (R_ij)
+        right_maps = maps[E:]              # [E, d, d] (R_ji)
+        maps_triu = torch.bmm(left_maps.transpose(1, 2),
+                              right_maps)  # [E, d, d]
 
-        # --- Собираем COO индексы и значения ---
-        indices = []
-        values = []
+        # ----- Матричная нормализация (твоя логика сохранена) -----
+        if self.training:
+            eps = torch.empty(d, device=device).uniform_(-1e-3, 1e-3)
+            I_aug = torch.diag(1.0 + eps).unsqueeze(0)
+        else:
+            I_aug = torch.eye(d, device=device).unsqueeze(0)
 
-        # Диагональ
-        for i in range(n):
-            idx = torch.cartesian_prod(torch.arange(d, device=device),
-                                       torch.arange(d, device=device))
-            idx = idx + i * d
-            indices.append(idx)
-            values.append(maps_diag[i].reshape(-1))
+        to_inv = maps_diag + I_aug
+        # [n,d], [n,d,d]
+        evals, evecs = torch.linalg.eigh(to_inv)
+        inv_sqrt = evecs @ torch.diag_embed(
+            evals.clamp_min(1e-8).pow(-0.5)) @ evecs.transpose(-1, -2)
 
-        # Внедиагональные блоки
-        for k in range(E):
-            i, j = row[k].item(), col[k].item()
-            block = -maps_triu[k]
+        # [E,d,d]
+        left_norm = inv_sqrt[row]
+        # [E,d,d]
+        right_norm = inv_sqrt[col]
+        maps_triu = (left_norm @ maps_triu @
+                     right_norm).clamp(min=-1, max=1)    # [E,d,d]
+        maps_diag = (inv_sqrt  @ maps_diag @
+                     inv_sqrt).clamp(min=-1, max=1)     # [n,d,d]
 
-            idx = torch.cartesian_prod(torch.arange(d, device=device),
-                                       torch.arange(d, device=device))
-            indices.append(idx + torch.tensor([i * d, j * d], device=device))
-            values.append(block.reshape(-1))
+        # ================== ВЕКТОРИЗОВАННАЯ СБОРКА COO ==================
+        # Локальные индексы в блоке d x d
+        a = torch.arange(d, device=device)
+        b = torch.arange(d, device=device)
+        A, B = torch.meshgrid(a, b, indexing="ij")   # [d,d]
 
-            indices.append(idx + torch.tensor([j * d, i * d], device=device))
-            values.append(block.t().reshape(-1))
+        diag_rows = (torch.arange(n, device=device)[
+                     :, None, None] * d + A).reshape(-1)
+        diag_cols = (torch.arange(n, device=device)[
+                     :, None, None] * d + B).reshape(-1)
+        diag_vals = maps_diag.reshape(-1)
 
-        indices = torch.cat(indices, dim=0).T  # [2, nnz]
-        values = torch.cat(values, dim=0)
+        # ---- Внедиагональные индексы (i,j) ----
+        A, B = torch.meshgrid(a, b, indexing="ij")   # [d,d]
 
-        L_sparse = torch.sparse_coo_tensor(
-            indices, values, size=(n * d, n * d), device=device
-        ).coalesce()
+        tri_rows_ij = (row[:, None, None] * d + A).reshape(-1)
+        tri_cols_ij = (col[:, None, None] * d + B).reshape(-1)
+        tri_vals_ij = (-maps_triu).reshape(-1)
 
-        return L_sparse
+        tri_rows_ji = (col[:, None, None] * d + A).reshape(-1)
+        tri_cols_ji = (row[:, None, None] * d + B).reshape(-1)
+        tri_vals_ji = (-maps_triu.transpose(1, 2)).reshape(-1)
+
+        # ---- Склейка ----
+        rows = torch.cat([diag_rows, tri_rows_ij, tri_rows_ji],
+                         dim=0)        # [nnz]
+        cols = torch.cat([diag_cols, tri_cols_ij, tri_cols_ji],
+                         dim=0)        # [nnz]
+        vals = torch.cat([diag_vals, tri_vals_ij, tri_vals_ji],
+                         dim=0)        # [nnz]
+
+        # [2, nnz]
+        indices = torch.stack([rows, cols], dim=0)
+        L = torch.sparse_coo_tensor(indices, vals, size=(
+            n * d, n * d), device=device).coalesce()
+        return L
