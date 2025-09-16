@@ -2,15 +2,11 @@ import os
 import tempfile
 from sklearn.metrics import precision_recall_curve
 import matplotlib.pyplot as plt
-import logging
-from sklearn.metrics import roc_curve, precision_recall_curve
+from sklearn.metrics import precision_recall_curve
 import torch
-import wandb
 from metrics.comet_logger import get_experiment
 from torchmetrics import Accuracy, Precision, Recall, F1Score, AUROC, Metric, AveragePrecision
 from torchmetrics.classification import BinaryROC, BinaryPrecisionRecallCurve
-from sklearn.metrics import confusion_matrix
-import numpy as np
 
 
 experiment = get_experiment()

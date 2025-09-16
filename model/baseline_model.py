@@ -37,6 +37,9 @@ class GAE(nn.Module):
         self.conv1 = GCNConv(hidden_dim1, hidden_dim1)
         self.conv2 = GCNConv(hidden_dim1, hidden_dim2)
 
+        self.last_linear = nn.Linear(
+            hidden_dim2, hidden_dim2, bias=True)
+
     def encode(self, data) -> torch.Tensor:
         """Энкодер: вычисляет скрытые представления вершин."""
         if self.preprocessor:
@@ -46,6 +49,9 @@ class GAE(nn.Module):
 
         x = F.relu(self.conv1(x, data.train_pos_edge_index))
         z = self.conv2(x, data.train_pos_edge_index)
+
+        z = self.last_linear(z)
+
         return z
 
     def decode(self, z: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:

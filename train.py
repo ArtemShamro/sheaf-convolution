@@ -69,13 +69,13 @@ def train(epochs, model, criterion, data, optimizer,
             metric_logger.update("test", val_logits, val_targets, 0.0)
 
             # --- Early stopping ---
-            # test_auc = metric_logger.metrics["test"].auroc.compute().item()
-            # if test_auc > best_val_auc:
-            #     best_val_auc = test_auc
-            #     best_test_auc = test_auc
-            #     stop_counter = 0
-            # else:
-            #     stop_counter += 1
+            test_auc = metric_logger.metrics["test"].auroc.compute().item()
+            if test_auc > best_val_auc:
+                best_val_auc = test_auc
+                best_test_auc = test_auc
+                stop_counter = 0
+            else:
+                stop_counter += 1
 
             metric_logger.log_to_wandb(epoch)
 
