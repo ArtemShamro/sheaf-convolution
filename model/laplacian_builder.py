@@ -75,11 +75,6 @@ class LaplacianBuilder(nn.Module):
 
 
 class SparseLaplacianBuilder(nn.Module):
-    """
-    Разрежённая сборка sheaf-лапласиана L \in R^{(n d) x (n d)} в формате COO,
-    БЕЗ питон-циклов по узлам/рёбрам.
-    """
-
     def __init__(self, device):
         super().__init__()
         self.device = device

@@ -11,11 +11,12 @@ def generate_movielens100k(device: str = "cpu"):
                             transform=T.NormalizeFeatures())
     hetero_data = dataset[0]  # HeteroData
 
-    num_users = hetero_data['user'].x.size(0)
-    num_movies = hetero_data['movie'].x.size(0)
+    num_users = hetero_data['user'].x.size(0)  # type: ignore
+    num_movies = hetero_data['movie'].x.size(0)  # type: ignore
 
     # сдвигаем индексы фильмов, чтобы они не пересекались с пользователями
-    edge_index = hetero_data['user', 'rates', 'movie'].edge_index.clone()
+    edge_index = hetero_data['user', 'rates',
+                             'movie'].edge_index.clone()  # type: ignore
     edge_index[1, :] += num_users
 
     # делаем неориентированный граф
@@ -26,8 +27,8 @@ def generate_movielens100k(device: str = "cpu"):
 
     # объединяем признаки в dict (передадим в Preprocessor)
     data.x_dict = {
-        'user': hetero_data['user'].x.to(device),
-        'movie': hetero_data['movie'].x.to(device),
+        'user': hetero_data['user'].x.to(device),  # type: ignore
+        'movie': hetero_data['movie'].x.to(device),  # type: ignore
     }
 
     # train/val/test сплит
@@ -52,11 +53,12 @@ def generate_movielens1m(device: str = "cpu"):
     )
     hetero_data = dataset[0]  # HeteroData
 
-    num_users = hetero_data['user'].x.size(0)
-    num_movies = hetero_data['movie'].x.size(0)
+    num_users = hetero_data['user'].x.size(0)  # type: ignore
+    num_movies = hetero_data['movie'].x.size(0)  # type: ignore
 
     # рёбра user->movie, но сдвигаем индексы фильмов
-    edge_index = hetero_data['user', 'rates', 'movie'].edge_index.clone()
+    edge_index = hetero_data['user', 'rates',
+                             'movie'].edge_index.clone()  # type: ignore
     edge_index[1, :] += num_users
 
     # делаем неориентированный граф
@@ -67,8 +69,8 @@ def generate_movielens1m(device: str = "cpu"):
 
     # сохраняем признаки как dict (для Preprocessor)
     data.x_dict = {
-        'user': hetero_data['user'].x.to(device),
-        'movie': hetero_data['movie'].x.to(device),
+        'user': hetero_data['user'].x.to(device),  # type: ignore
+        'movie': hetero_data['movie'].x.to(device),  # type: ignore
     }
 
     # train/val/test split

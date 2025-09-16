@@ -74,7 +74,7 @@ def train(epochs, model, criterion, data, optimizer,
                 best_val_auc = test_auc
                 best_test_auc = test_auc
                 stop_counter = 0
-            else:
+            elif epoch > 20:
                 stop_counter += 1
 
             metric_logger.log_to_wandb(epoch)

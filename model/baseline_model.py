@@ -9,7 +9,7 @@ from model.preprocessor import Preprocessor
 
 
 class GAE(nn.Module):
-    def __init__(self, input_dim, device,  hidden_dim1: int = 32, hidden_dim2: int = 16, dropout=0.2):
+    def __init__(self, input_dim, device,  hidden_dim1: int = 32, hidden_dim2: int = 16, dropout=0.1):
         """
         Graph Auto-Encoder (GAE) для линк-прогнозирования.
 
@@ -29,7 +29,6 @@ class GAE(nn.Module):
             self.first_linear = self.first_linear = nn.Identity() if self.preprocessor else nn.Sequential(
                 nn.Linear(input_dim, hidden_dim1 * 2),
                 nn.ELU(),
-                # nn.Dropout(self.dropout),
                 nn.Linear(hidden_dim1 * 2, hidden_dim1),
                 nn.ELU()
             )
@@ -47,7 +46,9 @@ class GAE(nn.Module):
         else:
             x = self.first_linear(data.x)  # type: ignore
 
+        x = F.dropout(x, p=self.dropout, training=self.training)
         x = F.relu(self.conv1(x, data.train_pos_edge_index))
+        x = F.dropout(x, p=self.dropout, training=self.training)
         z = self.conv2(x, data.train_pos_edge_index)
 
         z = self.last_linear(z)
