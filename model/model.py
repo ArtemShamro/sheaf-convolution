@@ -3,7 +3,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from model.maps_builder import MapsBuilder
-from model.laplacian_builder import LaplacianBuilder
+from model.laplacian_builder import LaplacianBuilder, SparseLaplacianBuilder
 from model.decoders import DotProductDecoder, BilinearDecoder, MLPDecoder
 from model.preprocessor import Preprocessor
 from torch_geometric.utils import negative_sampling
@@ -59,7 +59,7 @@ class Diffusion(nn.Module):
                 )
             )
 
-        self.laplacian_builder = LaplacianBuilder(device)
+        self.laplacian_builder = SparseLaplacianBuilder(device)
         self.alpha = nn.ParameterList([
             nn.Parameter(torch.tensor(0.5)) for _ in range(n_layers)
         ])
@@ -126,8 +126,10 @@ class Diffusion(nn.Module):
             dx = self.middle_linear[layer](h)  # [n, hidden]
             d = self.maps_dim
             # умножаем L на dx, учитывая блочную структуру
-            dx = torch.matmul(L, dx.reshape(num_nodes * d, -1)
-                              ).reshape(-1, self.hidden_dim)
+            # dx = torch.matmul(L, dx.reshape(num_nodes * d, -1)
+            #   ).reshape(-1, self.hidden_dim)
+            dx = torch.sparse.mm(L, dx.reshape(
+                num_nodes * d, -1)).reshape(-1, self.hidden_dim)
             h = h - self.alpha[layer] * dx
 
         h = self.last_linear(h)

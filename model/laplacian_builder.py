@@ -72,3 +72,74 @@ class LaplacianBuilder(nn.Module):
 
         L = L.permute(0, 2, 1, 3).reshape(n * d, n * d)
         return L
+
+
+class SparseLaplacianBuilder(nn.Module):
+    """
+    Сборка разреженного sheaf-Лапласиана как sparse COO матрицы.
+    Возвращает torch.sparse_coo_tensor размера [(n*d), (n*d)].
+    """
+
+    def __init__(self, device):
+        super().__init__()
+        self.device = device
+
+    def forward(self, maps, edge_index, num_nodes: int):
+        """
+        maps:       [2E, d, d]   (первые E — R_ij, вторые E — R_ji)
+        edge_index: [2, 2E]      (ориентированный)
+        num_nodes:  int
+        """
+        device = self.device
+        n = num_nodes
+        d = maps.size(1)
+        twoE = maps.size(0)
+        assert twoE % 2 == 0
+        E = twoE // 2
+
+        row, col = edge_index[:, :E]      # [E]
+        left_maps = maps[:E]              # [E, d, d] (R_ij)
+        right_maps = maps[E:]             # [E, d, d] (R_ji)
+
+        # --- Диагональные блоки ---
+        diag_contrib = torch.bmm(maps.transpose(1, 2), maps)  # [2E,d,d]
+        maps_diag = torch.zeros(n, d, d, device=device)
+        maps_diag.index_add_(0, edge_index[0],
+                             diag_contrib)  # суммируем по исходящим
+
+        # --- Внедиагональные блоки ---
+        maps_triu = torch.bmm(left_maps.transpose(1, 2), right_maps)  # [E,d,d]
+
+        # --- Собираем COO индексы и значения ---
+        indices = []
+        values = []
+
+        # Диагональ
+        for i in range(n):
+            idx = torch.cartesian_prod(torch.arange(d, device=device),
+                                       torch.arange(d, device=device))
+            idx = idx + i * d
+            indices.append(idx)
+            values.append(maps_diag[i].reshape(-1))
+
+        # Внедиагональные блоки
+        for k in range(E):
+            i, j = row[k].item(), col[k].item()
+            block = -maps_triu[k]
+
+            idx = torch.cartesian_prod(torch.arange(d, device=device),
+                                       torch.arange(d, device=device))
+            indices.append(idx + torch.tensor([i * d, j * d], device=device))
+            values.append(block.reshape(-1))
+
+            indices.append(idx + torch.tensor([j * d, i * d], device=device))
+            values.append(block.t().reshape(-1))
+
+        indices = torch.cat(indices, dim=0).T  # [2, nnz]
+        values = torch.cat(values, dim=0)
+
+        L_sparse = torch.sparse_coo_tensor(
+            indices, values, size=(n * d, n * d), device=device
+        ).coalesce()
+
+        return L_sparse
