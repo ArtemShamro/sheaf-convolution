@@ -9,7 +9,7 @@ from model.preprocessor import Preprocessor
 
 
 class GAE(nn.Module):
-    def __init__(self, input_dim, device,  hidden_dim1: int = 32, hidden_dim2: int = 16, dropout=0.1):
+    def __init__(self, input_dim, device,  hidden_dim1: int = 32, hidden_dim2: int = 16, dropout=0.1, **kwargs):
         """
         Graph Auto-Encoder (GAE) для линк-прогнозирования.
 

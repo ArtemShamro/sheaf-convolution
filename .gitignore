@@ -1,6 +1,8 @@
 # Datasets
 datasets/
 data/
+dl/
+optuna_logs/
 
 # Logs
 wandb/

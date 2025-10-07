@@ -1,0 +1,4 @@
+_target_: dataloader.HeteroGraphDataset
+name: "roman-empire"
+test_ratio: 0.1
+val_ratio: 0.1

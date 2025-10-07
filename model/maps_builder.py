@@ -17,7 +17,6 @@ class MapsBuilder(nn.Module):
             nn.ELU(),
             nn.Linear(features_dim * 2, maps_dim ** 2)
         )
-        nn.init.xavier_uniform_(self.mlp[-1].weight)
 
     def forward(self, x, edge_index):
         # edge_index: [2, num_edges]

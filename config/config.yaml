@@ -1,5 +1,6 @@
 defaults:
   - model: GAE
+  - dataset: synthetic
   - _self_
 
 hydra:
@@ -8,18 +9,13 @@ hydra:
     dir: .
 
 seed: 17
-epochs: 300
+seed_data: 11
+epochs: 1000
+exp_group: "new"
 
 optimizer:
   lr: 1e-3
   weight_decay: 1e-5
   early_stop: True
   early_stop_iters: 40
-
-dataset:
-  # "Synthetic", "Cora", "Citeseer", "PubMed", "Movielens1M", "Movielens100K"
-  name: Movielens100K
-  test_size: 0.1
-  # used for Synthetic dataset only:
-  ndata: 500
-  dimx: 20
+  min_iters: 20

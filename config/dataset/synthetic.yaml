@@ -1,0 +1,8 @@
+_target_: dataloader.dataloader_synthetic.SyntheticDataset
+ndata: 1000
+dimx: 4
+test_ratio: 0.1
+val_ratio: 0.1
+s_threshold: 0.1
+nproj: 4
+neg_ratio: 1

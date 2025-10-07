@@ -1,4 +1,5 @@
 _target_: model.baseline_model.GAE
-hidden_dim1: 32
+name: GAE
+hidden_dim1: 64
 hidden_dim2: 32
-dropout: 0.1
+dropout: 0.05

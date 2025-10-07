@@ -20,7 +20,7 @@ class Diffusion(nn.Module):
     Математика sheaf-Лапласиана сохранена; убран NetworkX.
     """
 
-    def __init__(self, input_dim, hidden_chanels, maps_dim, device, n_layers=2, decoder='dot_product', dropout=0.2):
+    def __init__(self, input_dim, hidden_chanels, maps_dim, device, n_layers=2, decoder='dot_product', dropout=0.2, **kwargs):
         super().__init__()
         self.hidden_dim = hidden_chanels * maps_dim
         self.input_dim = input_dim

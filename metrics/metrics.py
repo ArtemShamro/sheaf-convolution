@@ -4,19 +4,18 @@ from sklearn.metrics import precision_recall_curve
 import matplotlib.pyplot as plt
 from sklearn.metrics import precision_recall_curve
 import torch
-from metrics.comet_logger import get_experiment
 from torchmetrics import Accuracy, Precision, Recall, F1Score, AUROC, Metric, AveragePrecision
 from torchmetrics.classification import BinaryROC, BinaryPrecisionRecallCurve
 
 
-experiment = get_experiment()
-
-
 class MetricLogger:
-    def __init__(self, device, task="binary"):
+    def __init__(self, device, comet_logger, task="binary", ):
+        self.experiment = comet_logger.get_experiment()
         self.metrics = {
             "train": MultiMetric(task=task, prefix="train/").to(device),
-            "test": MultiMetric(task=task, prefix="test/").to(device)
+            "val": MultiMetric(task=task, prefix="val/").to(device)
+            # "test": MultiMetric(task=task, prefix="test/").to(device)
+
         }
 
     def update(self, split: str, logits: torch.Tensor, targets: torch.Tensor, loss: float):
@@ -35,13 +34,16 @@ class MetricLogger:
         for m in self.metrics.values():
             m.reset()
 
+    def log_other(self, name, val):
+        self.experiment.log_other(name, val)
+
     def log_to_wandb(self, epoch: int):
         metrics_dict = self.compute_all()
         log_dict = {"epoch": epoch}
         for split, metrics in metrics_dict.items():
             for k, v in metrics.items():
                 value = v if isinstance(v, float) else v.item()
-                experiment.log_metric(f"{split}/{k}", value, step=epoch)
+                self.experiment.log_metric(f"{split}/{k}", value, step=epoch)
 
 
 class MultiMetric(Metric):
@@ -101,7 +103,7 @@ class LayerwiseGradNormMetric(Metric):
             if param.grad is not None:
                 grad_norm = param.grad.norm().item()
                 self.grad_norms[name].append(grad_norm)
-                experiment.log_metric(
+                self.experiment.log_metric(
                     f"grad_norm/{name}", grad_norm, step=epoch)
 
     def compute(self):
@@ -110,84 +112,83 @@ class LayerwiseGradNormMetric(Metric):
     def reset(self):
         self.grad_norms = {name: [] for name in self.layer_names}
 
+    def compute_confusion_matrix_torch(self, y_true: torch.Tensor, y_pred: torch.Tensor):
+        # предполагаем бинарную классификацию (0/1)
+        tp = ((y_true == 1) & (y_pred == 1)).sum().item()
+        tn = ((y_true == 0) & (y_pred == 0)).sum().item()
+        fp = ((y_true == 0) & (y_pred == 1)).sum().item()
+        fn = ((y_true == 1) & (y_pred == 0)).sum().item()
+        return [[tn, fp], [fn, tp]]
 
-def compute_confusion_matrix_torch(y_true: torch.Tensor, y_pred: torch.Tensor):
-    # предполагаем бинарную классификацию (0/1)
-    tp = ((y_true == 1) & (y_pred == 1)).sum().item()
-    tn = ((y_true == 0) & (y_pred == 0)).sum().item()
-    fp = ((y_true == 0) & (y_pred == 1)).sum().item()
-    fn = ((y_true == 1) & (y_pred == 0)).sum().item()
-    return [[tn, fp], [fn, tp]]
+    def compute_log_confusion_matrix(self, labels, preds, train_mask, test_mask):
+        pred_classes = (preds > 0.5).int()
 
+        # train
+        cm_train = self.compute_confusion_matrix_torch(
+            labels[train_mask], pred_classes[train_mask])
+        self.experiment.log_confusion_matrix(
+            matrix=cm_train,
+            labels=["0", "1"],
+            title="Confusion Matrix (Train)",
+            file_name="train_confusion_matrix.json"
+        )
 
-def compute_log_confusion_matrix(labels, preds, train_mask, test_mask):
-    pred_classes = (preds > 0.5).int()
+        # test
+        cm_test = self.compute_confusion_matrix_torch(
+            labels[test_mask], pred_classes[test_mask])
+        self.experiment.log_confusion_matrix(
+            matrix=cm_test,
+            labels=["0", "1"],
+            title="Confusion Matrix (Test)",
+            file_name="test_confusion_matrix.json"
+        )
 
-    # train
-    cm_train = compute_confusion_matrix_torch(
-        labels[train_mask], pred_classes[train_mask])
-    experiment.log_confusion_matrix(
-        matrix=cm_train,
-        labels=["0", "1"],
-        title="Confusion Matrix (Train)",
-        file_name="train_confusion_matrix.json"
-    )
+    def log_curves_to_comet(self, probs, targets, split: str):
+        # считаем метрики на GPU
+        roc_metric = BinaryROC()
+        pr_metric = BinaryPrecisionRecallCurve()
+        roc_metric.update(probs, targets)
+        pr_metric.update(probs, targets)
 
-    # test
-    cm_test = compute_confusion_matrix_torch(
-        labels[test_mask], pred_classes[test_mask])
-    experiment.log_confusion_matrix(
-        matrix=cm_test,
-        labels=["0", "1"],
-        title="Confusion Matrix (Test)",
-        file_name="test_confusion_matrix.json"
-    )
+        fpr, tpr, _ = roc_metric.compute()
+        precision_torch, recall_torch, _ = pr_metric.compute()
 
+        # считаем PR ещё раз через sklearn для совместимости (если нужно)
+        precision, recall, _ = precision_recall_curve(
+            targets.cpu().numpy(), probs.cpu().numpy()
+        )
 
-def log_curves_to_comet(probs, targets, split: str):
-    # считаем метрики на GPU
-    roc_metric = BinaryROC()
-    pr_metric = BinaryPrecisionRecallCurve()
-    roc_metric.update(probs, targets)
-    pr_metric.update(probs, targets)
+        # === ROC plot ===
+        plt.figure()
+        plt.plot(fpr.cpu().numpy(), tpr.cpu().numpy(), label="ROC curve")
+        plt.plot([0, 1], [0, 1], "k--")
+        plt.xlabel("False Positive Rate")
+        plt.ylabel("True Positive Rate")
+        plt.title(f"{split} ROC curve")
+        plt.legend(loc="lower right")
 
-    fpr, tpr, _ = roc_metric.compute()
-    precision_torch, recall_torch, _ = pr_metric.compute()
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmpfile:
+            plt.savefig(tmpfile.name)
+            self.experiment.log_image(
+                tmpfile.name, name=f"{split}_roc_curve.png")
+        plt.close()
 
-    # считаем PR ещё раз через sklearn для совместимости (если нужно)
-    precision, recall, _ = precision_recall_curve(
-        targets.cpu().numpy(), probs.cpu().numpy()
-    )
+        # === Precision-Recall plot ===
+        plt.figure()
+        plt.plot(recall, precision, label="PR curve (sklearn)")
+        plt.xlabel("Recall")
+        plt.ylabel("Precision")
+        plt.title(f"{split} Precision-Recall curve")
+        plt.legend(loc="lower left")
 
-    # === ROC plot ===
-    plt.figure()
-    plt.plot(fpr.cpu().numpy(), tpr.cpu().numpy(), label="ROC curve")
-    plt.plot([0, 1], [0, 1], "k--")
-    plt.xlabel("False Positive Rate")
-    plt.ylabel("True Positive Rate")
-    plt.title(f"{split} ROC curve")
-    plt.legend(loc="lower right")
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmpfile:
+            plt.savefig(tmpfile.name)
+            self.experiment.log_image(
+                tmpfile.name, name=f"{split}_pr_curve.png")
+        plt.close()
 
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmpfile:
-        plt.savefig(tmpfile.name)
-        experiment.log_image(tmpfile.name, name=f"{split}_roc_curve.png")
-    plt.close()
-
-    # === Precision-Recall plot ===
-    plt.figure()
-    plt.plot(recall, precision, label="PR curve (sklearn)")
-    plt.xlabel("Recall")
-    plt.ylabel("Precision")
-    plt.title(f"{split} Precision-Recall curve")
-    plt.legend(loc="lower left")
-
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmpfile:
-        plt.savefig(tmpfile.name)
-        experiment.log_image(tmpfile.name, name=f"{split}_pr_curve.png")
-    plt.close()
-
-    # подчистим временные файлы
-    try:
-        os.remove(tmpfile.name)
-    except:
-        pass
+        # подчистим временные файлы
+        try:
+            os.remove(tmpfile.name)
+        except:
+            pass
