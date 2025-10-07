@@ -6,7 +6,7 @@ from torchmetrics.classification import BinaryAUROC, BinaryAveragePrecision
 
 
 def train(epochs, model, data, optimizer,
-          metric_logger, scheduler=None, early_stop_iters=0, min_iters=0, **cfg):
+          metric_logger, scheduler=None, early_stop_iters=0, min_iters=0, log_epoch=10, **cfg):
     """
     Тренировка модели с логгированием train/val/test метрик в Comet.
     Лучшие метрики определяются по val_auc.
@@ -92,14 +92,16 @@ def train(epochs, model, data, optimizer,
                 best_state_dict = model.state_dict()
 
             if val_loss < best_val_loss:
+                best_val_loss = val_loss
                 stop_counter = 0
             else:
                 stop_counter += 1
 
-            metric_logger.log_to_wandb(epoch)
+            if epoch % log_epoch == 0:
+                metric_logger.log_to_wandb(epoch)
 
             pbar.set_postfix(
-                train_loss=loss.item(),
+                train_loss=loss.detach().item(),
                 val_ap=val_ap,
                 val_auc=val_auc
             )

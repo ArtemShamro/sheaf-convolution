@@ -62,7 +62,7 @@ def experiment_size_effect():
        n_proj = 4, d_x = 16
     """
     exp_name = "size_effect"
-    levels = [200, 1000, 2000, 5000, 10000]
+    levels = [200, 500, 1000, 2000, 4000]
 
     for model in MODELS:
         for n_data in levels:

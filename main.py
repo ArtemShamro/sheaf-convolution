@@ -73,7 +73,8 @@ def main(cfg: DictConfig):
         metric_logger=metric_logger,
         early_stop_iters=cfg.optimizer.early_stop_iters,
         scheduler=scheduler,
-        min_iters=cfg.optimizer.min_iters
+        min_iters=cfg.optimizer.min_iters,
+        log_epoch=cfg.log_epoch
     )
     comet_logger.end()
     return best_val_auc
