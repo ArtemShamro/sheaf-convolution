@@ -14,12 +14,12 @@ BASE_SYNTHETIC = {
 
 BASE_RUNTIME = {
     "GAE": {
-        "epochs": 1000,
+        "epochs": 2000,
         "optimizer.lr": 8e-3,
         "optimizer.weight_decay": 1e-5,
         "model.dropout": 0.1, },
     "Diffusion": {
-        "epochs": 1000,
+        "epochs": 2000,
         "optimizer.lr": 8e-3,
         "optimizer.weight_decay": 3e-5,
         "model.dropout": 0.1, }

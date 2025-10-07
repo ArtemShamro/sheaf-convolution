@@ -59,17 +59,12 @@ class GAE(nn.Module):
         """Декодер: скалярное произведение для рёбер."""
         return (z[edge_index[0]] * z[edge_index[1]]).sum(dim=1)
 
-    def recon_loss(self, z: torch.Tensor, pos_edge_index: torch.Tensor) -> torch.Tensor:
+    def recon_loss(self, z: torch.Tensor, pos_edge_index: torch.Tensor, neg_edge_index: torch.Tensor) -> torch.Tensor:
         """Функция потерь: бинарная кросс-энтропия по позитивным и негативным рёбрам."""
         pos_loss = - \
             torch.log(torch.sigmoid(self.decode(
                 z, pos_edge_index)) + 1e-15).mean()
 
-        neg_edge_index = negative_sampling(
-            edge_index=pos_edge_index,
-            num_nodes=z.size(0),
-            num_neg_samples=pos_edge_index.size(1),
-        )
         neg_loss = -torch.log(
             1 - torch.sigmoid(self.decode(z, neg_edge_index)) + 1e-15
         ).mean()

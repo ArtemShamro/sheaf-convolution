@@ -141,21 +141,13 @@ class Diffusion(nn.Module):
         """
         return self.decoder(z, edge_index)
 
-    def recon_loss(self, z: torch.Tensor, pos_edge_index: torch.Tensor) -> torch.Tensor:
+    def recon_loss(self, z: torch.Tensor, pos_edge_index: torch.Tensor, neg_edge_index: torch.Tensor) -> torch.Tensor:
         """
         BPR-подобная лог-вероятность для позитивных/негативных рёбер.
         """
-        # позитивные
         pos_logit = self.decode(z, pos_edge_index)
         pos_loss = -torch.log(torch.sigmoid(pos_logit) + 1e-15).mean()
 
-        # негативные (семплируем столько же)
-        neg_edge_index = negative_sampling(
-            edge_index=pos_edge_index,
-            num_nodes=z.size(0),
-            num_neg_samples=pos_edge_index.size(1),
-            force_undirected=True
-        )
         neg_logit = self.decode(z, neg_edge_index)
         neg_loss = -torch.log(1 - torch.sigmoid(neg_logit) + 1e-15).mean()
 

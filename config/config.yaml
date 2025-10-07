@@ -10,12 +10,12 @@ hydra:
 
 seed: 17
 seed_data: 11
-epochs: 1000
+epochs: 2000
 exp_group: "new"
 
 optimizer:
-  lr: 1e-3
+  lr: 8e-3
   weight_decay: 1e-5
   early_stop: True
-  early_stop_iters: 40
-  min_iters: 20
+  early_stop_iters: 50
+  min_iters: 200

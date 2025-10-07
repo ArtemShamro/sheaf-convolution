@@ -2,6 +2,7 @@ from tqdm import tqdm
 import torch
 import logging
 from torch_geometric.utils import negative_sampling
+from torchmetrics.classification import BinaryAUROC, BinaryAveragePrecision
 
 
 def train(epochs, model, data, optimizer,
@@ -21,6 +22,7 @@ def train(epochs, model, data, optimizer,
     best_epoch = 0
     best_state_dict = None
     stop_counter = 0
+    best_val_loss = 1e10
 
     with tqdm(range(1, epochs + 1)) as pbar:
         for epoch in pbar:
@@ -30,14 +32,6 @@ def train(epochs, model, data, optimizer,
 
             # --- Encode ---
             z = model.encode(data)
-
-            # --- Train loss ---
-            loss = model.recon_loss(z, data.train_pos_edge_index)
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
-            optimizer.step()
-            if scheduler is not None:
-                scheduler.step()
 
             # --- Train metrics ---
             pos_all_edge_index = torch.cat([
@@ -53,6 +47,15 @@ def train(epochs, model, data, optimizer,
                 force_undirected=True
             )
 
+            # --- Train loss ---
+            loss = model.recon_loss(
+                z, data.train_pos_edge_index, train_neg_edge_index)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
+            optimizer.step()
+            if scheduler is not None:
+                scheduler.step()
+
             pos_train_logits = model.decode(z, data.train_pos_edge_index)
             neg_train_logits = model.decode(z, train_neg_edge_index)
             train_logits = torch.cat(
@@ -62,7 +65,7 @@ def train(epochs, model, data, optimizer,
                 torch.zeros(neg_train_logits.size(0), device=device)
             ]).long()
             metric_logger.update("train", train_logits,
-                                 train_targets, loss.item())
+                                 train_targets, loss.detach().item())
 
             # --- Validation metrics ---
             pos_val_logits = model.decode(z, data.val_pos_edge_index)
@@ -72,18 +75,23 @@ def train(epochs, model, data, optimizer,
                 torch.ones(pos_val_logits.size(0), device=device),
                 torch.zeros(neg_val_logits.size(0), device=device)
             ]).long()
-            metric_logger.update("val", val_logits, val_targets, 0.0)
+            with torch.no_grad():
+                val_loss = model.recon_loss(
+                    z, data.val_pos_edge_index, data.val_neg_edge_index)
+            metric_logger.update("val", val_logits, val_targets, val_loss)
 
             # --- Compute val metrics ---
             val_auc = metric_logger.metrics["val"].auroc.compute().item()
             val_ap = metric_logger.metrics["val"].ap.compute().item()
 
             # --- Save best model by val AUC ---
-            if val_auc > best_val_auc and epoch > min_iters:
+            if val_ap > best_val_ap:
                 best_val_auc = val_auc
                 best_val_ap = val_ap
                 best_epoch = epoch
                 best_state_dict = model.state_dict()
+
+            if val_loss < best_val_loss:
                 stop_counter = 0
             else:
                 stop_counter += 1
@@ -97,7 +105,7 @@ def train(epochs, model, data, optimizer,
             )
 
             # --- Early stopping ---
-            if early_stop_iters and epoch >= min_iters and stop_counter == early_stop_iters:
+            if early_stop_iters and (epoch >= min_iters) and (stop_counter == early_stop_iters):
                 logger.info(f"Early stopping triggered at epoch {epoch}")
                 break
 
@@ -118,7 +126,6 @@ def train(epochs, model, data, optimizer,
 
             # вычисляем метрики напрямую, чтобы не перезаписывать logger
             probs = torch.sigmoid(test_logits)
-            from torchmetrics.classification import BinaryAUROC, BinaryAveragePrecision
             test_auc = BinaryAUROC().to(device)(probs, test_targets).item()
             test_ap = BinaryAveragePrecision().to(device)(probs, test_targets).item()
 
