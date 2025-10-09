@@ -11,7 +11,7 @@ hydra:
 seed: 17
 seed_data: 11
 epochs: 2000
-log_epoch: 50
+log_epoch: 10
 exp_group: "new"
 enable_profiler: False
 

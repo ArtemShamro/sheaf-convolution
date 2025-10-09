@@ -18,7 +18,7 @@ class MetricLogger:
 
         }
 
-    def update(self, split: str, logits: torch.Tensor, targets: torch.Tensor, loss: float):
+    def update(self, split: str, logits: torch.Tensor, targets: torch.Tensor, loss: torch.Tensor):
         self.metrics[split].update(logits, targets, loss)
 
     def compute(self, split: str):

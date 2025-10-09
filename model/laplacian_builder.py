@@ -59,8 +59,8 @@ class LaplacianBuilder(nn.Module):
         maps_triu = left_norm @ maps_triu @ right_norm
         maps_diag = inv_sqrt @ maps_diag @ inv_sqrt
 
-        maps_triu = maps_triu  # .clamp(min=-1, max=1)
-        maps_diag = maps_diag  # .clamp(min=-1, max=1)
+        maps_triu = maps_triu.clamp(min=-1, max=1)
+        maps_diag = maps_diag.clamp(min=-1, max=1)
 
         # 4) Собираем плотный L \in R^{(n d) \times (n d)} из блоков
         L = torch.zeros(n, n, d, d, device=device)
