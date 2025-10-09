@@ -9,10 +9,10 @@ from dataloader import BaseDataset
 class HeteroGraphDataset(BaseDataset):
     """Загрузка гетерофильных графов из Yandex Research."""
 
-    def __init__(self, name: str, val_ratio=0.5, test_ration=0.15, device: str = "cpu", **kwargs):
+    def __init__(self, name: str, val_ratio=0.5, test_ratio=0.15, device: str = "cpu", **kwargs):
         super().__init__(device)
         self.name = name
-        self.test_ratio = test_ration
+        self.test_ratio = test_ratio
         self.val_ratio = val_ratio
 
     def get_data(self):

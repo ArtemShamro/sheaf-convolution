@@ -1,6 +1,6 @@
 defaults:
   - model: GAE
-  - dataset: synthetic
+  - dataset: hetero
   - _self_
 
 hydra:
