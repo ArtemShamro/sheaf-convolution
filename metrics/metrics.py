@@ -65,35 +65,31 @@ class MetricLogger:
                 if not param.requires_grad:
                     continue
 
-                # Норма весов
                 param_norm = param.data.detach().cpu().norm(2).item()
                 param_norms.append(param_norm)
 
-                # Норма градиентов (если есть)
                 if param.grad is not None:
                     grad_norm = param.grad.detach().cpu().norm(2).item()
                     grad_norms.append(grad_norm)
 
         # --- Логгирование распределений ---
-        if len(param_norms) > 0:
-            experiment.log_histogram_3d(
-                param_norms,
-                name="param_norm/distribution",
-                step=step,
-                title="Distribution of parameter L2 norms"
-            )
+        if param_norms:
+            # experiment.log_histogram_3d(
+            #     param_norms,
+            #     name="param_norm/distribution",
+            #     step=step,
+            # )
             experiment.log_metric(
                 "param_norm/mean", float(torch.tensor(param_norms).mean()), step=step)
             experiment.log_metric(
                 "param_norm/std", float(torch.tensor(param_norms).std()), step=step)
 
-        if len(grad_norms) > 0:
-            experiment.log_histogram_3d(
-                grad_norms,
-                name="grad_norm/distribution",
-                step=step,
-                title="Distribution of gradient L2 norms"
-            )
+        if grad_norms:
+            # experiment.log_histogram_3d(
+            #     grad_norms,
+            #     name="grad_norm/distribution",
+            #     step=step,
+            # )
             experiment.log_metric(
                 "grad_norm/mean", float(torch.tensor(grad_norms).mean()), step=step)
             experiment.log_metric(

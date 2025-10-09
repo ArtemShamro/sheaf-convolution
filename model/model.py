@@ -75,12 +75,8 @@ class Diffusion(nn.Module):
                 self.decoder = MLPDecoder(
                     self.hidden_dim, decoder_dropout=self.dropout)
             case _:
-                # по умолчанию оставим dot-product
                 self.decoder = DotProductDecoder()
 
-        self.norm = nn.LayerNorm(self.hidden_dim)
-
-    # ---------- ВСПОМОГАТЕЛЬНОЕ: сформировать ориентированные рёбра (i->j) и (j->i) ----------
     @staticmethod
     def _make_oriented_pairs(edge_index: torch.Tensor, num_nodes: int) -> torch.Tensor:
         """
@@ -116,7 +112,6 @@ class Diffusion(nn.Module):
             pos_edge_index, num_nodes)
         maps_norms = []
         for layer in range(self.n_layers):
-            h = self.norm(h)  # !!!!!!!!!!!
             x_maps = F.dropout(h, p=self.dropout,
                                training=self.training)
             maps = self.maps_builders[layer](
@@ -130,9 +125,6 @@ class Diffusion(nn.Module):
 
             dx = self.middle_linear[layer](h)  # [n, hidden]
             d = self.maps_dim
-            # умножаем L на dx, учитывая блочную структуру
-            # dx = torch.matmul(L, dx.reshape(num_nodes * d, -1)
-            #   ).reshape(-1, self.hidden_dim)
             dx = torch.sparse.mm(L, dx.reshape(
                 num_nodes * d, -1)).reshape(-1, self.hidden_dim)
             h = h - self.alpha[layer] * dx

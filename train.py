@@ -69,8 +69,6 @@ def train(epochs, model, data, optimizer,
                 optimizer.step()
                 if scheduler is not None:
                     scheduler.step()
-                if epoch % 10:
-                    metric_logger.log_model_params(model, maps_norm, epoch)
                 with torch.no_grad():
                     pos_train_logits = model.decode(
                         z, data.train_pos_edge_index)
@@ -119,6 +117,7 @@ def train(epochs, model, data, optimizer,
                     stop_counter += 1
 
                 if epoch % log_epoch == 0:
+                    metric_logger.log_model_params(model, maps_norm, epoch)
                     metric_logger.log_to_wandb(epoch)
 
                 pbar.set_postfix(
