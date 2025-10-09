@@ -51,7 +51,7 @@ def train(epochs, model, data, optimizer,
                 optimizer.zero_grad()
 
                 # --- Encode ---
-                z = model.encode(data)
+                z, maps_norm = model.encode(data)
 
                 # --- Train metrics ---
                 train_neg_edge_index = negative_sampling_fast(
@@ -69,7 +69,8 @@ def train(epochs, model, data, optimizer,
                 optimizer.step()
                 if scheduler is not None:
                     scheduler.step()
-
+                if epoch % 10:
+                    metric_logger.log_model_params(model, maps_norm, epoch)
                 with torch.no_grad():
                     pos_train_logits = model.decode(
                         z, data.train_pos_edge_index)
@@ -139,7 +140,7 @@ def train(epochs, model, data, optimizer,
         model.load_state_dict(best_state_dict)
         model.eval()
         with torch.no_grad():
-            z = model.encode(data)
+            z, _ = model.encode(data)
 
             pos_test_logits = model.decode(z, data.test_pos_edge_index)
             neg_test_logits = model.decode(z, data.test_neg_edge_index)

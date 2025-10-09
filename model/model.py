@@ -95,11 +95,10 @@ class Diffusion(nn.Module):
         # конкатенируем (i->j) и (j->i)
         oriented = torch.cat([torch.stack([row_u, col_u], dim=0),
                               torch.stack([col_u, row_u], dim=0)], dim=1)
-        return torch.cat([edge_index, edge_index.flip(0)], dim=1)  # !---------
-        # return oriented
+        return oriented
 
     # ---------- API совместимый с train() ----------
-    def encode(self, data: Data) -> torch.Tensor:
+    def encode(self, data: Data):
         """
         Вычисляет эмбеддинги узлов с использованием sheaf-Лапласиана,
         построенного по train графу.
@@ -115,13 +114,17 @@ class Diffusion(nn.Module):
         # строим ориентированный edge_index из train_pos_edge_index
         oriented_edge_index = self._make_oriented_pairs(
             pos_edge_index, num_nodes)
-
+        maps_norms = []
         for layer in range(self.n_layers):
             h = self.norm(h)  # !!!!!!!!!!!
             x_maps = F.dropout(h, p=self.dropout,
                                training=self.training)
             maps = self.maps_builders[layer](
                 x_maps, oriented_edge_index)  # [2E, d, d]
+
+            mean_norm = maps.norm(dim=(1, 2)).mean().detach().item()
+            maps_norms.append(mean_norm)
+
             L = self.laplacian_builder(
                 maps, oriented_edge_index, num_nodes)  # [(n d),(n d)]
 
@@ -135,7 +138,7 @@ class Diffusion(nn.Module):
             h = h - self.alpha[layer] * dx
 
         h = self.last_linear(h)
-        return h  # z
+        return h, maps_norms  # z
 
     def decode(self, z: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
         """

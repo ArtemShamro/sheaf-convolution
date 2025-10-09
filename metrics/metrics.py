@@ -49,6 +49,42 @@ class MetricLogger:
                         v = v.mean().item()
                 self.experiment.log_metric(f"{split}/{k}", v, step=epoch)
 
+    def log_model_params(self, model: torch.nn.Module, maps_norms, step: int | None = None):
+        """
+        Логгирует в Comet:
+            - нормы параметров (L2-норма весов по каждому слою)
+            - нормы градиентов (L2-норма по каждому слою)
+        Вызывается после backward() и перед/после optimizer.step().
+        """
+        experiment = self.experiment
+        total_param_norm = 0.0
+        total_grad_norm = 0.0
+
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                # Норма весов
+                param_norm = param.data.norm(2).item()
+                total_param_norm += param_norm ** 2
+                experiment.log_metric(
+                    f"param_norm/{name}", param_norm, step=step)
+
+                # Норма градиентов (если они посчитаны)
+                if param.grad is not None:
+                    grad_norm = param.grad.data.norm(2).item()
+                    total_grad_norm += grad_norm ** 2
+                    experiment.log_metric(
+                        f"grad_norm/{name}", grad_norm, step=step)
+
+        total_param_norm = total_param_norm ** 0.5
+        total_grad_norm = total_grad_norm ** 0.5
+
+        experiment.log_metric("param_norm/total", total_param_norm, step=step)
+        experiment.log_metric("grad_norm/total", total_grad_norm, step=step)
+
+        for i, norm_val in enumerate(maps_norms):
+            experiment.log_metric(
+                f"maps/layer_{i}_mean_norm", norm_val, step=step)
+
 
 class MultiMetric(Metric):
     def __init__(self, task, prefix, loss_only=False):
