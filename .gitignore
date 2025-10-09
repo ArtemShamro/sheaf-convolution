@@ -12,6 +12,7 @@ multirun/
 # notebooks
 helper.ipynb
 hints
+/test.ipynb
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

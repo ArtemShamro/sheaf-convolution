@@ -49,41 +49,61 @@ class MetricLogger:
                         v = v.mean().item()
                 self.experiment.log_metric(f"{split}/{k}", v, step=epoch)
 
-    def log_model_params(self, model: torch.nn.Module, maps_norms, step: int | None = None):
+    def log_model_params(self, model: torch.nn.Module, maps_norms=None, step: int | None = None):
         """
-        Логгирует в Comet:
-            - нормы параметров (L2-норма весов по каждому слою)
-            - нормы градиентов (L2-норма по каждому слою)
-        Вызывается после backward() и перед/после optimizer.step().
+        Логгирует в Comet распределения:
+          - L2-норм весов по всем параметрам модели
+          - L2-норм градиентов
+        Оптимизировано: все тензоры .detach().cpu() для скорости и безопасности.
         """
         experiment = self.experiment
-        total_param_norm = 0.0
-        total_grad_norm = 0.0
+        param_norms = []
+        grad_norms = []
 
-        for name, param in model.named_parameters():
-            if param.requires_grad:
+        with torch.no_grad():
+            for _, param in model.named_parameters():
+                if not param.requires_grad:
+                    continue
+
                 # Норма весов
-                param_norm = param.data.norm(2).item()
-                total_param_norm += param_norm ** 2
-                experiment.log_metric(
-                    f"param_norm/{name}", param_norm, step=step)
+                param_norm = param.data.detach().cpu().norm(2).item()
+                param_norms.append(param_norm)
 
-                # Норма градиентов (если они посчитаны)
+                # Норма градиентов (если есть)
                 if param.grad is not None:
-                    grad_norm = param.grad.data.norm(2).item()
-                    total_grad_norm += grad_norm ** 2
-                    experiment.log_metric(
-                        f"grad_norm/{name}", grad_norm, step=step)
+                    grad_norm = param.grad.detach().cpu().norm(2).item()
+                    grad_norms.append(grad_norm)
 
-        total_param_norm = total_param_norm ** 0.5
-        total_grad_norm = total_grad_norm ** 0.5
-
-        experiment.log_metric("param_norm/total", total_param_norm, step=step)
-        experiment.log_metric("grad_norm/total", total_grad_norm, step=step)
-
-        for i, norm_val in enumerate(maps_norms):
+        # --- Логгирование распределений ---
+        if len(param_norms) > 0:
+            experiment.log_histogram_3d(
+                param_norms,
+                name="param_norm/distribution",
+                step=step,
+                title="Distribution of parameter L2 norms"
+            )
             experiment.log_metric(
-                f"maps/layer_{i}_mean_norm", norm_val, step=step)
+                "param_norm/mean", float(torch.tensor(param_norms).mean()), step=step)
+            experiment.log_metric(
+                "param_norm/std", float(torch.tensor(param_norms).std()), step=step)
+
+        if len(grad_norms) > 0:
+            experiment.log_histogram_3d(
+                grad_norms,
+                name="grad_norm/distribution",
+                step=step,
+                title="Distribution of gradient L2 norms"
+            )
+            experiment.log_metric(
+                "grad_norm/mean", float(torch.tensor(grad_norms).mean()), step=step)
+            experiment.log_metric(
+                "grad_norm/std", float(torch.tensor(grad_norms).std()), step=step)
+
+        # --- (опционально) логгирование норм карт ---
+        if maps_norms is not None:
+            for i, norm_val in enumerate(maps_norms):
+                experiment.log_metric(
+                    f"maps/layer_{i}_mean_norm", norm_val, step=step)
 
 
 class MultiMetric(Metric):
