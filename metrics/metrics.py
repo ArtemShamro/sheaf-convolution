@@ -6,6 +6,7 @@ from sklearn.metrics import precision_recall_curve
 import torch
 from torchmetrics import Accuracy, Precision, Recall, F1Score, AUROC, Metric, AveragePrecision
 from torchmetrics.classification import BinaryROC, BinaryPrecisionRecallCurve
+from torchmetrics.functional.classification import binary_auroc, binary_average_precision
 
 
 class MetricLogger:
@@ -40,8 +41,13 @@ class MetricLogger:
         metrics_dict = self.compute_all()
         for split, metrics in metrics_dict.items():
             for k, v in metrics.items():
-                value = v if isinstance(v, float) else v.item()
-                self.experiment.log_metric(f"{split}/{k}", value, step=epoch)
+                if isinstance(v, torch.Tensor):
+                    v = v.detach().to("cpu", non_blocking=True)
+                    try:
+                        v = float(v)
+                    except Exception:
+                        v = v.mean().item()
+                self.experiment.log_metric(f"{split}/{k}", v, step=epoch)
 
 
 class MultiMetric(Metric):
@@ -52,43 +58,46 @@ class MultiMetric(Metric):
         # self.precision = Precision(task=task)
         # self.recall = Recall(task=task)
         self.loss_only = loss_only
-        self.loss = 0.0
-        if not loss_only:
-            self.auroc = AUROC(task=task)
-            self.ap = AveragePrecision(task=task)
+        self.loss = torch.tensor(0.0)
+        self.val_logits = []
+        self.val_targets = []
+        # if not loss_only:
+        #     self.auroc = AUROC(task=task)
+        #     self.ap = AveragePrecision(task=task)
 
-    def update(self, logits: torch.Tensor, targets: torch.Tensor, loss: float):
-        pred_classes = (logits > 0).int()
+    def update(self, logits: torch.Tensor, targets: torch.Tensor, loss: torch.Tensor):
         # self.accuracy.update(pred_classes, targets)
         # self.precision.update(pred_classes, targets)
         # self.recall.update(pred_classes, targets)
-        self.loss += loss
+        self.loss = self.loss + loss.detach()
         if not self.loss_only:
-            probs = torch.sigmoid(logits)
-            self.ap.update(probs, targets)
-            self.auroc.update(probs, targets)
+            self.val_logits.append(logits.detach())
+            self.val_targets.append(targets.detach())
+            # probs = torch.sigmoid(logits)
+            # self.ap.update(probs, targets)
+            # self.auroc.update(probs, targets)
             # self.loss += loss
 
     def compute(self):
-        return {
-            # f"accuracy": self.accuracy.compute().item(),
-            # f"precision": self.precision.compute().item(),
-            # f"recall": self.recall.compute().item(),
-            f"loss": self.loss,
-            f"aucroc": self.auroc.compute().item(),
-            f"ap": self.ap.compute().item()
-        } if not self.loss_only else {
-            f"loss": self.loss,
-        }
+        result = {"loss": self.loss}
+        if not self.loss_only:
+            # result["aucroc"] = self.auroc.compute()
+            # result["ap"] = self.ap.compute()
+            logits = torch.cat(self.val_logits, dim=0)
+            targets = torch.cat(self.val_targets, dim=0)
+            probs = torch.sigmoid(logits)
+            # считаем метрики напрямую — без sync
+            result["aucroc"] = binary_auroc(probs, targets)
+            result["ap"] = binary_average_precision(probs, targets)
+        return result
 
     def reset(self):
-        # self.accuracy.reset()
-        # self.precision.reset()
-        # self.recall.reset()
-        self.loss = 0.0
-        if not self.loss_only:
-            self.auroc.reset()
-            self.ap.reset()
+        self.loss = torch.tensor(0.0)
+        self.val_logits.clear()
+        self.val_targets.clear()
+        # if not self.loss_only:
+        #     self.auroc.reset()
+        #     self.ap.reset()
 
 
 class LayerwiseGradNormMetric(Metric):

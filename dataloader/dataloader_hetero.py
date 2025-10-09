@@ -9,7 +9,7 @@ from dataloader import BaseDataset
 class HeteroGraphDataset(BaseDataset):
     """Загрузка гетерофильных графов из Yandex Research."""
 
-    def __init__(self, name: str, val_ratio=0.5, test_ratio=0.15, device: str = "cpu", **kwargs):
+    def __init__(self, name: str, val_ratio=0.5, test_ratio=0.15, device: str = "cuda", **kwargs):
         super().__init__(device)
         self.name = name
         self.test_ratio = test_ratio
@@ -28,14 +28,8 @@ class HeteroGraphDataset(BaseDataset):
             data, val_ratio=self.val_ratio, test_ratio=self.test_ratio)
 
         # Переносим на устройство
-        data.x = data.x.to(self.device)
-        data.train_pos_edge_index = data.train_pos_edge_index.to(self.device)
-        data.val_pos_edge_index = data.val_pos_edge_index.to(self.device)
-        data.test_pos_edge_index = data.test_pos_edge_index.to(self.device)
-
-        if data.val_neg_edge_index is not None:
-            data.val_neg_edge_index = data.val_neg_edge_index.to(self.device)
-        if data.test_neg_edge_index is not None:
-            data.test_neg_edge_index = data.test_neg_edge_index.to(self.device)
+        for key, value in data:
+            if isinstance(value, torch.Tensor):
+                data[key] = value.to(self.device, non_blocking=True)
         self.data = data
         return data, dataset.num_node_features

@@ -1,18 +1,16 @@
 from tqdm import tqdm
 import torch
-import logging
-from torch_geometric.utils import negative_sampling
+from utils import negative_sampling_fast
 from torchmetrics.classification import BinaryAUROC, BinaryAveragePrecision
+import contextlib
 
 
 def train(epochs, model, data, optimizer,
-          metric_logger, scheduler=None, early_stop_iters=0, min_iters=0, log_epoch=10, **cfg):
+          metric_logger, logger, scheduler=None, early_stop_iters=0, min_iters=0, log_epoch=10, enable_profiler=False, **cfg):
     """
     Тренировка модели с логгированием train/val/test метрик в Comet.
     Лучшие метрики определяются по val_auc.
     """
-
-    logger = logging.getLogger(__name__)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Using device: {device}")
@@ -24,92 +22,117 @@ def train(epochs, model, data, optimizer,
     stop_counter = 0
     best_val_loss = 1e10
 
-    with tqdm(range(1, epochs + 1)) as pbar:
-        for epoch in pbar:
-            metric_logger.reset_all()
-            model.train()
-            optimizer.zero_grad()
+    pos_all_edge_index = torch.cat([
+        data.train_pos_edge_index,
+        data.val_pos_edge_index,
+        data.test_pos_edge_index
+    ], dim=1)
 
-            # --- Encode ---
-            z = model.encode(data)
+    if enable_profiler:
+        logger.info("Profiler enabled")
+        profiler_ctx = torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU,
+                        torch.profiler.ProfilerActivity.CUDA],
+            schedule=torch.profiler.schedule(
+                wait=2, warmup=2, active=3, repeat=1),
+            on_trace_ready=torch.profiler.tensorboard_trace_handler(
+                "./profiler_logs"),
+            record_shapes=True,
+            with_stack=True
+        )
+    else:
+        profiler_ctx = contextlib.nullcontext()
 
-            # --- Train metrics ---
-            pos_all_edge_index = torch.cat([
-                data.train_pos_edge_index,
-                data.val_pos_edge_index,
-                data.test_pos_edge_index
-            ], dim=1)
+    with profiler_ctx:
+        with tqdm(range(1, epochs + 1)) as pbar:
+            for epoch in pbar:
+                metric_logger.reset_all()
+                model.train()
+                optimizer.zero_grad()
 
-            train_neg_edge_index = negative_sampling(
-                edge_index=pos_all_edge_index,
-                num_nodes=data.num_nodes,
-                num_neg_samples=data.train_pos_edge_index.size(1),
-                force_undirected=True
-            )
+                # --- Encode ---
+                z = model.encode(data)
 
-            # --- Train loss ---
-            loss = model.recon_loss(
-                z, data.train_pos_edge_index, train_neg_edge_index)
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
-            optimizer.step()
-            if scheduler is not None:
-                scheduler.step()
+                # --- Train metrics ---
+                train_neg_edge_index = negative_sampling_fast(
+                    pos_all_edge_index,
+                    num_nodes=data.num_nodes,
+                    num_neg_samples=data.train_pos_edge_index.size(1)
+                )
 
-            pos_train_logits = model.decode(z, data.train_pos_edge_index)
-            neg_train_logits = model.decode(z, train_neg_edge_index)
-            train_logits = torch.cat(
-                [pos_train_logits, neg_train_logits], dim=0)
-            train_targets = torch.cat([
-                torch.ones(pos_train_logits.size(0), device=device),
-                torch.zeros(neg_train_logits.size(0), device=device)
-            ]).long()
-            metric_logger.update("train", train_logits,
-                                 train_targets, loss.detach().item())
+                # --- Train loss ---
+                loss = model.recon_loss(
+                    z, data.train_pos_edge_index, train_neg_edge_index)
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), max_norm=5.0)
+                optimizer.step()
+                if scheduler is not None:
+                    scheduler.step()
 
-            # --- Validation metrics ---
-            pos_val_logits = model.decode(z, data.val_pos_edge_index)
-            neg_val_logits = model.decode(z, data.val_neg_edge_index)
-            val_logits = torch.cat([pos_val_logits, neg_val_logits], dim=0)
-            val_targets = torch.cat([
-                torch.ones(pos_val_logits.size(0), device=device),
-                torch.zeros(neg_val_logits.size(0), device=device)
-            ]).long()
-            with torch.no_grad():
-                val_loss = model.recon_loss(
-                    z, data.val_pos_edge_index, data.val_neg_edge_index)
-            metric_logger.update("val", val_logits, val_targets, val_loss)
+                with torch.no_grad():
+                    pos_train_logits = model.decode(
+                        z, data.train_pos_edge_index)
+                    neg_train_logits = model.decode(z, train_neg_edge_index)
+                    train_logits = torch.cat(
+                        [pos_train_logits, neg_train_logits], dim=0)
+                    train_targets = torch.cat([
+                        torch.ones(pos_train_logits.size(0), device=device),
+                        torch.zeros(neg_train_logits.size(0), device=device)
+                    ]).long()
 
-            # --- Compute val metrics ---
-            val_auc = metric_logger.metrics["val"].auroc.compute().item()
-            val_ap = metric_logger.metrics["val"].ap.compute().item()
+                    metric_logger.update("train", train_logits,
+                                         train_targets, loss.detach())
 
-            # --- Save best model by val AUC ---
-            if val_ap > best_val_ap:
-                best_val_auc = val_auc
-                best_val_ap = val_ap
-                best_epoch = epoch
-                best_state_dict = model.state_dict()
+                # --- Validation metrics ---
+                with torch.no_grad():
+                    pos_val_logits = model.decode(z, data.val_pos_edge_index)
+                    neg_val_logits = model.decode(z, data.val_neg_edge_index)
+                    val_logits = torch.cat(
+                        [pos_val_logits, neg_val_logits], dim=0)
+                    val_targets = torch.cat([
+                        torch.ones(pos_val_logits.size(0), device=device),
+                        torch.zeros(neg_val_logits.size(0), device=device)
+                    ]).long()
+                    val_loss = model.recon_loss(
+                        z, data.val_pos_edge_index, data.val_neg_edge_index)
+                metric_logger.update(
+                    "val", val_logits, val_targets, val_loss.detach())
 
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                stop_counter = 0
-            else:
-                stop_counter += 1
+                # --- Compute val metrics ---
+                val_results = metric_logger.metrics["val"].compute()
+                val_auc = val_results["aucroc"]
+                val_ap = val_results["ap"]
 
-            if epoch % log_epoch == 0:
-                metric_logger.log_to_wandb(epoch)
+                # --- Save best model by val AUC ---
+                if val_ap > best_val_ap:
+                    best_val_auc = val_auc
+                    best_val_ap = val_ap
+                    best_epoch = epoch
+                    best_state_dict = model.state_dict()
 
-            pbar.set_postfix(
-                train_loss=loss.detach().item(),
-                val_ap=val_ap,
-                val_auc=val_auc
-            )
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    stop_counter = 0
+                else:
+                    stop_counter += 1
 
-            # --- Early stopping ---
-            if early_stop_iters and (epoch >= min_iters) and (stop_counter == early_stop_iters):
-                logger.info(f"Early stopping triggered at epoch {epoch}")
-                break
+                if epoch % log_epoch == 0:
+                    metric_logger.log_to_wandb(epoch)
+
+                pbar.set_postfix(
+                    train_loss=float(loss.detach().cpu()),
+                    val_ap=float(val_ap.detach().cpu()),
+                    val_auc=float(val_auc.detach().cpu())
+                )
+
+                # --- Early stopping ---
+                if early_stop_iters and (epoch >= min_iters) and (stop_counter == early_stop_iters):
+                    logger.info(f"Early stopping triggered at epoch {epoch}")
+                    break
+
+                if enable_profiler and hasattr(profiler_ctx, "step"):
+                    profiler_ctx.step()
 
     # --- Evaluate test metrics on best model ---
     if best_state_dict is not None:

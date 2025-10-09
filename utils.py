@@ -204,33 +204,33 @@ class CustomBCELoss(nn.Module):
         # Возвращаем среднее значение потерь
         return loss.mean()
 
-# class CustomBCELoss(nn.Module):
-#     def __init__(self, print_loss=False):
-#         super().__init__()
-#         self.print_loss = print_loss
 
-#     def forward(self, preds, targets, mask=None):
-#         if mask is not None:
-#             preds = preds[mask]
-#             targets = targets[mask]
+@torch.no_grad()
+def negative_sampling_fast(
+    pos_edge_index: torch.Tensor,
+    num_nodes: int,
+    num_neg_samples: int | None = None,
+    device: str | torch.device = "cuda"
+) -> torch.Tensor:
+    """
+    Быстрое полностью асинхронное negative sampling на GPU.
+    Не выполняет никаких CPU-синхронизаций (нет item(), any(), if и т.д.)
+    """
+    if num_neg_samples is None:
+        num_neg_samples = pos_edge_index.size(1)
 
-#         # Ограничиваем pos_weight для стабильности
-#         pos_weight = min((targets.numel() - targets.sum()) /
-#                          targets.sum(), 50.0)
-#         pos_weight = torch.tensor(pos_weight, device=preds.device)
+    device = torch.device(device)
 
-#         # Используем BCEWithLogitsLoss
-#         criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-#         loss = criterion(preds.flatten(), targets.flatten())
+    # Сэмплируем сразу две матрицы источников и приёмников
+    src = torch.randint(0, num_nodes, (num_neg_samples,), device=device)
+    dst = torch.randint(0, num_nodes, (num_neg_samples,), device=device)
 
-#         if self.print_loss:
-#             print("NEG WEIGHTS:", pos_weight.item())
-#             print("PREDICTIONS:", preds.flatten()[:10])
-#             print("TARGETS:", targets.flatten()[:10])
-#             print("LOSS:", loss.item())
-#             print("")
+    # Убираем самосвязи без if / sync
+    new_dst = torch.randint(0, num_nodes, (num_neg_samples,), device=device)
+    # Если src == dst, берём новое значение, иначе старое
+    dst = torch.where(src == dst, new_dst, dst)
 
-#         return loss
+    return torch.stack((src, dst), dim=0)
 
 
 class VGAELoss(nn.Module):

@@ -1,6 +1,6 @@
 defaults:
-  - model: GAE
-  - dataset: hetero
+  - model: Diffusion
+  - dataset: synthetic
   - _self_
 
 hydra:
@@ -11,8 +11,9 @@ hydra:
 seed: 17
 seed_data: 11
 epochs: 2000
-log_epoch: 20
+log_epoch: 50
 exp_group: "new"
+enable_profiler: False
 
 optimizer:
   lr: 8e-3

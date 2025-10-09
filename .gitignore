@@ -3,6 +3,7 @@ datasets/
 data/
 dl/
 optuna_logs/
+profiler_logs/
 
 # Logs
 wandb/

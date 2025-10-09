@@ -7,7 +7,7 @@ import torch
 class BaseDataset(ABC):
     """Базовый класс для всех датасетов."""
 
-    def __init__(self, device: str = "cpu"):
+    def __init__(self, device: str = "cuda"):
         self.device = device
         self.data = None
 

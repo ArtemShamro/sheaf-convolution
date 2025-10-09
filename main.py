@@ -71,10 +71,12 @@ def main(cfg: DictConfig):
         data.to(device),
         optimizer,
         metric_logger=metric_logger,
+        logger=logger,
         early_stop_iters=cfg.optimizer.early_stop_iters,
         scheduler=scheduler,
         min_iters=cfg.optimizer.min_iters,
-        log_epoch=cfg.log_epoch
+        log_epoch=cfg.log_epoch,
+        enable_profiler=cfg.enable_profiler
     )
     comet_logger.end()
     return best_val_auc

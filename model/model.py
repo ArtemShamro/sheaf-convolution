@@ -32,7 +32,7 @@ class Diffusion(nn.Module):
         if self.input_dim == None:
             self.input_dim = self.hidden_dim
             self.preprocessor = Preprocessor(
-                hidden_dim=self.hidden_dim, device=device).to(device)
+                hidden_dim=self.hidden_dim, device=device)
 
         self.first_linear = self.first_linear = nn.Identity() if self.preprocessor else nn.Sequential(
             nn.Linear(self.input_dim, self.hidden_dim * 2),
