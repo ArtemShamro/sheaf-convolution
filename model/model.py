@@ -95,7 +95,8 @@ class Diffusion(nn.Module):
         # конкатенируем (i->j) и (j->i)
         oriented = torch.cat([torch.stack([row_u, col_u], dim=0),
                               torch.stack([col_u, row_u], dim=0)], dim=1)
-        return oriented
+        return torch.cat([edge_index, edge_index.flip(0)], dim=1)  # !---------
+        # return oriented
 
     # ---------- API совместимый с train() ----------
     def encode(self, data: Data) -> torch.Tensor:
@@ -116,6 +117,7 @@ class Diffusion(nn.Module):
             pos_edge_index, num_nodes)
 
         for layer in range(self.n_layers):
+            h = self.norm(h)  # !!!!!!!!!!!
             x_maps = F.dropout(h, p=self.dropout,
                                training=self.training)
             maps = self.maps_builders[layer](

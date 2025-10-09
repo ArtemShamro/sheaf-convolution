@@ -2,9 +2,10 @@
 import torch
 from hydra import initialize, compose
 from main import main as train_main
+import random
 
 MODELS = ["GAE", "Diffusion"]
-SEEDS = [1, 2, 3]
+SEEDS = random.sample(range(0, 10_000), 3)
 SEED_DATA = 11
 
 REAL_GRAPHS = [
