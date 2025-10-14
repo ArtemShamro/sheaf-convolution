@@ -32,3 +32,30 @@ def export_synth_exp_group_table(workspace_name, project_name, exp_group: str) -
 
     df = pd.DataFrame(rows)
     return df
+
+
+def export_real_exp_group_table(workspace_name, project_name, exp_group: str) -> pd.DataFrame:
+    api = comet_ml.API(cache=False)
+
+    query_condition = (Parameter("exp_group") == exp_group)
+    matching_api_experiments = api.query(
+        workspace_name, project_name, query_condition)
+
+    rows = []
+    for exp in matching_api_experiments:
+        row = {
+            "model_name": str(exp.get_parameters_summary('model|name')['valueMax']),
+            "model/total_params": int(exp.get_others_summary("model/total_params")[0]),
+
+            "best_epoch": int(exp.get_others_summary("best_epoch")[0]),
+            "best_val_ap": float(exp.get_metrics_summary("val/ap")['valueMax']),
+            "best_val_auc": float(exp.get_metrics_summary("val/aucroc")['valueMax']),
+            "test_ap_at_best_val": float(exp.get_others_summary("test_ap_at_best_val")[0]),
+            "test_auc_at_best_val": float(exp.get_others_summary("test_auc_at_best_val")[0]),
+
+            "dataset/name": str(exp.get_others_summary("dataset/name")[0]),
+        }
+        rows.append(row)
+
+    df = pd.DataFrame(rows)
+    return df
